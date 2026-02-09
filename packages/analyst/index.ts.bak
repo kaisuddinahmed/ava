@@ -1,0 +1,769 @@
+import express from 'express';
+import cors from 'cors';
+import { WebSocketServer, WebSocket } from 'ws';
+import { createServer } from 'http';
+import { randomUUID } from 'crypto';
+import { AnalystContract, UserEvent, IntentState, DetectedFriction } from '@virtual-salesman/shared/types';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+// ES Module __dirname equivalent
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+const app = express();
+app.use(cors());
+app.use(express.json());
+
+// Serve the UI static files
+app.use(express.static(path.join(__dirname, 'ui/dist')));
+
+const server = createServer(app);
+const wss = new WebSocketServer({ server });
+
+// --- Mock "Analyst Brain" State ---
+const activeSessions = new Map<string, AnalystContract>();
+const eventHistory = new Map<string, UserEvent[]>(); // Store last N events per session
+const dashboardClients = new Set<WebSocket>();
+const sessionTimestamps = new Map<string, number>();
+
+// Intervention tracking
+interface InterventionRecord {
+    type: string;
+    timestamp: number;
+    message: string;
+}
+
+const sessionInterventions: Map<string, InterventionRecord[]> = new Map();
+const sessionStartTimes: Map<string, number> = new Map();
+
+function canFireIntervention(sessionId: string, interventionType: string, sessionContext: any): boolean {
+    const now = Date.now();
+
+    // Track session start
+    if (!sessionStartTimes.has(sessionId)) {
+        sessionStartTimes.set(sessionId, now);
+    }
+
+    const sessionDuration = now - (sessionStartTimes.get(sessionId) || now);
+    const interventions = sessionInterventions.get(sessionId) || [];
+
+    // Cooldown periods (in milliseconds)
+    const COOLDOWNS: Record<string, number> = {
+        'exit_intent': 5 * 60 * 1000,         // 5 minutes
+        'price_sensitivity': Infinity,         // Once per session
+        'search_frustration': Infinity,        // Once per session
+        'specs_help': Infinity,                // Disabled
+        'indecision': 3 * 60 * 1000,          // 3 minutes
+        'comparison_loop': 3 * 60 * 1000,     // 3 minutes
+        'high_interest': 4 * 60 * 1000,       // 4 minutes
+        'checkout_hesitation': 2 * 60 * 1000, // 2 minutes
+        'confusion': 3 * 60 * 1000            // 3 minutes
+    };
+
+    // Minimum session time before allowing intervention
+    const MIN_SESSION_TIME: Record<string, number> = {
+        'exit_intent': 2 * 60 * 1000,         // 2 minutes
+        'price_sensitivity': 1 * 60 * 1000,   // 1 minute
+        'search_frustration': 5 * 60 * 1000,  // 5 minutes
+    };
+
+    // Check minimum session time
+    const minTime = MIN_SESSION_TIME[interventionType] || 0;
+    if (sessionDuration < minTime) {
+        return false;
+    }
+
+    // Context-specific checks
+    if (interventionType === 'price_sensitivity') {
+        // Only fire after 3+ price hovers
+        const priceHovers = (sessionContext.priceHoverCount || 0);
+        if (priceHovers < 3) return false;
+    }
+
+    if (interventionType === 'search_frustration') {
+        // Require extensive browsing
+        const scrolls = sessionContext.scrollCount || 0;
+        const products = sessionContext.productsViewed || 0;
+        if (scrolls < 50 || products < 10) return false;
+    }
+
+    // Check cooldown
+    const lastFired = interventions.find(i => i.type === interventionType);
+    if (lastFired) {
+        const cooldown = COOLDOWNS[interventionType] || 0;
+        if (cooldown === Infinity) {
+            return false; // Already fired, never fire again
+        }
+        if (now - lastFired.timestamp < cooldown) {
+            return false; // Still in cooldown
+        }
+    }
+
+    // Max 2 interventions for exit intent
+    if (interventionType === 'exit_intent') {
+        const exitCount = interventions.filter(i => i.type === 'exit_intent').length;
+        if (exitCount >= 2) return false;
+    }
+
+    return true;
+}
+
+function recordIntervention(sessionId: string, interventionType: string, message: string) {
+    if (!sessionInterventions.has(sessionId)) {
+        sessionInterventions.set(sessionId, []);
+    }
+    sessionInterventions.get(sessionId)!.push({
+        type: interventionType,
+        timestamp: Date.now(),
+        message
+    });
+}
+
+function getLastEventTime(sessionId: string): number {
+    return sessionTimestamps.get(sessionId) || 0;
+}
+
+function setLastEventTime(sessionId: string, time: number) {
+    sessionTimestamps.set(sessionId, time);
+}
+
+// Basic Rule Engine (The "Model")
+function generateContract(event: UserEvent): AnalystContract {
+    // History Management
+    if (!eventHistory.has(event.session_id)) {
+        eventHistory.set(event.session_id, []);
+    }
+    const history = eventHistory.get(event.session_id)!;
+    history.push(event);
+    if (history.length > 20) history.shift(); // Keep last 20 events
+
+    let friction: DetectedFriction[] = [];
+    let intent: IntentState = {
+        primary_intent: 'exploratory',
+        confidence: 0.8
+    };
+
+    // --- DETECTION LOGIC ---
+
+    // --- DETECTOR LOGIC (Updated for Phase 3 Demo Suite) ---
+
+    // 1. Confusion (Add -> Remove Cycle)
+    if (event.event_type === 'remove_from_cart') {
+        const addedItem = event.payload?.product_id;
+        const recentAdd = history.find(e => e.event_type === 'add_to_cart' && e.payload?.product_id === addedItem);
+        if (recentAdd) {
+            friction.push({ type: 'confusion', confidence: 0.85, evidence: ['add_remove_cycle'] });
+            intent = { primary_intent: 'friction', confidence: 0.85 };
+        }
+    }
+
+    // 2. Search Frustration (Zero Results)
+    if (event.event_type === 'search_zero_results') {
+        friction.push({ type: 'frustration', confidence: 0.9, evidence: ['zero_results_search'] });
+        intent = { primary_intent: 'friction', confidence: 0.9 };
+    }
+
+    // 3. Filter Loop (Indecision) [NEW]
+    if (event.event_type === 'click' && event.payload?.target === 'filter') {
+        // Count recent filter clicks
+        const recentFilters = history.filter(e =>
+            e.event_type === 'click' &&
+            e.payload?.target === 'filter' &&
+            new Date(e.timestamp).getTime() > Date.now() - 10000 // Last 10s
+        ).length;
+
+        if (recentFilters >= 3) {
+            friction.push({ type: 'indecision', confidence: 0.8, evidence: ['rapid_filter_change'] });
+            intent = { primary_intent: 'friction', confidence: 0.8 };
+        }
+    }
+
+    // 4. Specs Interest (Technical Buyer) [NEW]
+    if (event.event_type === 'click' && event.payload?.target === 'specs_toggle' && event.payload?.state === 'open') {
+        intent = { primary_intent: 'research', confidence: 0.8 };
+    }
+
+    // 5. Checkout Stall (Hesitation on Add to Cart) [NEW]
+    if (event.event_type === 'hover' && event.payload?.element === 'add_to_cart_btn') {
+        intent = { primary_intent: 'purchase', confidence: 0.7 };
+        // If they hover for a while (handled by client debounce mainly, but simple check here)
+        friction.push({ type: 'hesitation', confidence: 0.6, evidence: ['hover_add_cart'] });
+    }
+
+    // 6. Wishlist Activity (High Interest Signal)
+    if (event.event_type === 'add_to_wishlist') {
+        intent = { primary_intent: 'high_interest', confidence: 0.85 };
+        // Wishlist is a strong purchase signal - customer is considering but not ready yet
+    }
+
+    // 7. Similar Items (Comparison Shopping)
+    if (event.event_type === 'view_item' && event.payload?.type === 'similar_trigger') {
+        intent = { primary_intent: 'comparison', confidence: 0.75 };
+    }
+
+    // Existing Signals
+    if (event.event_type === 'click_rage') {
+        friction.push({ type: 'trust', confidence: 0.95, evidence: ['click_rage_detected'] });
+        intent = { primary_intent: 'friction', confidence: 0.95 };
+    } else if (event.event_type === 'exit_intent') {
+        intent = { primary_intent: 'abandonment_risk', confidence: 0.95 };
+    } else if (event.event_type === 'hover' && (event.payload?.element === 'price')) {
+        friction.push({ type: 'price_sensitivity', confidence: 0.9, evidence: ['hovered_price_tag'] });
+        intent = { primary_intent: 'friction', confidence: 0.9 };
+    }
+
+    // --- P0 NEW EVENTS ---
+
+    // 8. Product Detail Modal - High Interest Signals
+    if (event.event_type === 'product_detail') {
+        if (event.payload?.action === 'description_expanded') {
+            intent = { primary_intent: 'high_interest', confidence: 0.9 };
+        } else if (event.payload?.action === 'add_to_wishlist') {
+            intent = { primary_intent: 'high_interest', confidence: 0.85 };
+        } else if (event.payload?.action === 'quantity_increased') {
+            intent = { primary_intent: 'purchase', confidence: 0.85 };
+        } else if (event.payload?.action === 'quantity_decreased') {
+            friction.push({ type: 'hesitation', confidence: 0.7, evidence: ['quantity_reduction'] });
+        } else if (event.payload?.action === 'add_to_cart') {
+            intent = { primary_intent: 'purchase', confidence: 0.95 };
+        } else if (event.payload?.action === 'closed' && event.payload?.time_spent_ms > 30000) {
+            // Spent 30+ seconds in modal = high interest
+            intent = { primary_intent: 'high_interest', confidence: 0.8 };
+        }
+    }
+
+    // 9. Enhanced Hover - Product Context
+    if (event.event_type === 'element_hover') {
+        if (event.payload?.element_type === 'product_price' && event.payload?.hover_duration_ms > 2000) {
+            friction.push({ type: 'price_sensitivity', confidence: 0.85, evidence: ['long_price_hover'] });
+        } else if (event.payload?.element_type === 'product_image' && event.payload?.hover_duration_ms > 3000) {
+            intent = { primary_intent: 'research', confidence: 0.7 };
+        } else if (event.payload?.element_type === 'add_to_cart_btn' && event.payload?.hover_duration_ms > 2000) {
+            friction.push({ type: 'hesitation', confidence: 0.75, evidence: ['cart_button_hesitation'] });
+        }
+    }
+
+    // 10. Cart Actions - Purchase Intent
+    if (event.event_type === 'cart_action') {
+        if (event.payload?.action === 'item_added') {
+            intent = { primary_intent: 'purchase', confidence: 0.9 };
+        } else if (event.payload?.action === 'item_removed') {
+            friction.push({ type: 'confusion', confidence: 0.75, evidence: ['cart_item_removed'] });
+        } else if (event.payload?.action === 'quantity_decreased') {
+            friction.push({ type: 'hesitation', confidence: 0.7, evidence: ['cart_quantity_reduced'] });
+        }
+    }
+
+    // 11. Similar Product Clicked - Comparison Loop Detection
+    if (event.event_type === 'similar_product_clicked') {
+        const recentSimilarClicks = history.filter(e =>
+            e.event_type === 'similar_product_clicked' &&
+            new Date(e.timestamp).getTime() > Date.now() - 30000 // Last 30s
+        ).length;
+
+        if (recentSimilarClicks >= 3) {
+            friction.push({ type: 'indecision', confidence: 0.85, evidence: ['comparison_loop'] });
+            intent = { primary_intent: 'comparison', confidence: 0.9 };
+        } else {
+            intent = { primary_intent: 'comparison', confidence: 0.75 };
+        }
+    }
+
+    // 12. Session Journey - Track abandonment risk
+    if (event.event_type === 'session_journey') {
+        const path = event.payload?.path || [];
+        if (path.length > 5 && path.filter((p: any) => p.url.includes('cart')).length === 0) {
+            // Browsing many pages but never visiting cart = low intent
+            intent = { primary_intent: 'exploratory', confidence: 0.8 };
+        }
+    }
+
+    // --- P1 NEW EVENTS ---
+
+    // 13. Browsing Pattern Detection
+    if (event.event_type === 'browsing_pattern') {
+        if (event.payload?.pattern === 'scroll_without_click') {
+            friction.push({ type: 'frustration', confidence: 0.75, evidence: ['scrolling_no_engagement'] });
+            intent = { primary_intent: 'friction', confidence: 0.75 };
+        } else if (event.payload?.pattern === 'searching_frustrated') {
+            friction.push({ type: 'frustration', confidence: 0.85, evidence: ['search_without_results'] });
+            intent = { primary_intent: 'friction', confidence: 0.85 };
+        }
+    }
+
+    // 14. Predictive Purchase Score
+    let purchaseScore = 50;
+    if (event.event_type === 'product_detail' || event.event_type === 'cart_action') {
+        const hasCartItems = history.some(e => e.event_type === 'add_to_cart' || (e.event_type === 'cart_action' && e.payload?.action === 'item_added'));
+        const hasWishlist = history.some(e => e.event_type === 'add_to_wishlist');
+        const expandedDescription = history.some(e => e.event_type === 'product_detail' && e.payload?.action === 'description_expanded');
+        const hasExitIntent = history.some(e => e.event_type === 'exit_intent');
+
+        if (hasCartItems) purchaseScore += 20;
+        if (hasWishlist) purchaseScore += 15;
+        if (expandedDescription) purchaseScore += 15;
+        if (event.event_type === 'cart_action') purchaseScore += 10;
+        if (hasExitIntent) purchaseScore -= 25;
+        if (friction.length > 0) purchaseScore -= 10;
+
+        purchaseScore = Math.max(0, Math.min(100, purchaseScore));
+
+        if (purchaseScore > 75) {
+            intent = { primary_intent: 'purchase', confidence: purchaseScore / 100 };
+        }
+    }
+
+    // --- P2 NEW EVENTS ---
+
+    // 15. Search Actions
+    if (event.event_type === 'search_action') {
+        if (event.payload?.action === 'typing' && event.payload?.time_to_type > 3000) {
+            friction.push({ type: 'indecision', confidence: 0.65, evidence: ['slow_search_typing'] });
+        }
+    }
+
+    // 16. Attention Indicators
+    if (event.event_type === 'attention') {
+        if (event.payload?.signal === 'tab_hidden') {
+            friction.push({ type: 'trust', confidence: 0.6, evidence: ['tab_switch_comparison'] });
+        }
+    }
+
+    // --- P3 NEW EVENTS ---
+
+    // 17. Filter Usage Patterns
+    if (event.event_type === 'filter_usage') {
+        if (event.payload?.pattern === 'rapid_change') {
+            friction.push({ type: 'indecision', confidence: 0.8, evidence: ['rapid_filter_switching'] });
+            intent = { primary_intent: 'friction', confidence: 0.8 };
+        }
+    }
+
+    // 18. Network Speed (Slow connection = potential frustration)
+    if (event.event_type === 'network_speed') {
+        if (event.payload?.effective_type === 'slow-2g' || event.payload?.effective_type === '2g') {
+            friction.push({ type: 'frustration', confidence: 0.7, evidence: ['slow_network'] });
+        }
+    }
+
+    // 19. Device Context (Mobile users may have different behavior)
+    if (event.event_type === 'device_context') {
+        if (event.payload?.device_type === 'mobile' && event.payload?.viewport_width < 400) {
+            // Small screen mobile users might have navigation friction
+            friction.push({ type: 'clarity', confidence: 0.5, evidence: ['small_screen_mobile'] });
+        }
+    }
+
+
+    // --- CONTRACT CONSTRUCTION ---
+    const contract: AnalystContract = {
+        session_id: event.session_id,
+        timestamp: new Date().toISOString(),
+        intent_state: intent,
+        friction_types: friction,
+        recommended_actions: [],
+        forbidden_actions: [],
+        rationale: "Analysis based on Demo Suite patterns.",
+        expiry: new Date(Date.now() + 1000 * 60 * 5).toISOString()
+    };
+
+    // --- RECOMMENDATION LOGIC ---
+
+    // 1. Exit Intent (High Priority)
+    if (intent.primary_intent === 'abandonment_risk') {
+        contract.recommended_actions.push({
+            action_type: 'voice_proactive',
+            priority: 1,
+            message_template: "Wait! Before you go, I can offer you a 10% discount if you complete your order today.",
+            constraints: { max_frequency: '1/session', requires_user_consent: false }
+        });
+    }
+    // 2. Indecision (Filters)
+    else if (friction.some(f => f.type === 'indecision')) {
+        contract.recommended_actions.push({
+            action_type: 'voice_proactive',
+            priority: 2,
+            message_template: "Having trouble deciding? I can help you find the best option for your budget.",
+            constraints: { max_frequency: '1/session', requires_user_consent: false }
+        });
+    }
+    // 3. Low Trust / Confusion
+    else if (friction.some(f => f.type === 'confusion' || f.type === 'trust')) {
+        contract.recommended_actions.push({
+            action_type: 'voice_proactive',
+            priority: 1,
+            message_template: "I noticed you're going back and forth. Need help choosing between these models?",
+            constraints: { max_frequency: '1/session', requires_user_consent: false }
+        });
+    }
+    // 4. Price Sensitivity
+    else if (friction.some(f => f.type === 'price_sensitivity')) {
+        contract.recommended_actions.push({
+            action_type: 'voice_proactive',
+            priority: 2,
+            message_template: "I see you're checking the price. We verify all competitors to ensure you get the best deal.",
+            constraints: { max_frequency: '1/session', requires_user_consent: false }
+        });
+    }
+    // 5. Specs Research - REMOVED (too annoying, not valuable)
+    // else if (event.event_type === 'click' && event.payload?.target === 'specs_toggle' && event.payload?.state === 'open') {
+    //     // This was firing too often and not providing value
+    // }
+    // 6. Checkout Stall (Hesitation)
+    else if (friction.some(f => f.type === 'hesitation')) {
+        contract.recommended_actions.push({
+            action_type: 'voice_proactive',
+            priority: 2,
+            message_template: "Ready to complete your order? I can help you find the right size if you're unsure.",
+            constraints: { max_frequency: '1/session', requires_user_consent: false }
+        });
+    }
+    // 7. Frustration (Search)
+    else if (friction.some(f => f.type === 'frustration')) {
+        contract.recommended_actions.push({
+            action_type: 'voice_proactive',
+            priority: 1,
+            message_template: "Looks like you can't find what you're looking for. Tell me what you need!",
+            constraints: { max_frequency: '1/session', requires_user_consent: false }
+        });
+    }
+    // 8. High Interest (Description Expanded)
+    else if (intent.primary_intent === 'high_interest' && event.event_type === 'product_detail' && event.payload?.action === 'description_expanded') {
+        contract.recommended_actions.push({
+            action_type: 'voice_proactive',
+            priority: 3,
+            message_template: "I see you're really interested in this product. Any questions I can answer?",
+            constraints: { max_frequency: '1/session', requires_user_consent: false }
+        });
+    }
+    // 9. Comparison Loop
+    else if (intent.primary_intent === 'comparison' && friction.some(f => f.type === 'indecision' && f.evidence.includes('comparison_loop'))) {
+        contract.recommended_actions.push({
+            action_type: 'voice_proactive',
+            priority: 2,
+            message_template: "I notice you're comparing similar products. Let me help you understand the key differences.",
+            constraints: { max_frequency: '1/session', requires_user_consent: false }
+        });
+    }
+    // 10. Browsing Frustration Pattern
+    else if (event.event_type === 'browsing_pattern' && friction.some(f => f.type === 'frustration')) {
+        if (event.payload?.pattern === 'scroll_without_click') {
+            contract.recommended_actions.push({
+                action_type: 'voice_proactive',
+                priority: 2,
+                message_template: "I notice you're browsing. Can I help you find something specific?",
+                constraints: { max_frequency: '1/session', requires_user_consent: false }
+            });
+        } else if (event.payload?.pattern === 'searching_frustrated') {
+            contract.recommended_actions.push({
+                action_type: 'voice_proactive',
+                priority: 1,
+                message_template: "Having trouble finding what you need? Tell me what you're looking for and I'll help.",
+                constraints: { max_frequency: '1/session', requires_user_consent: false }
+            });
+        }
+    }
+
+    // --- FILTER ---
+    // Rule: Only recommend actions if confidence is > 0.7
+    contract.recommended_actions = contract.recommended_actions.filter(action => {
+        // Find the friction driving this action
+        // (Simplified logic: taking the highest confidence friction present)
+        const maxFriction = Math.max(...friction.map(f => f.confidence), 0);
+        const intentConf = intent.confidence;
+
+        return Math.max(maxFriction, intentConf) > 0.7;
+    });
+
+    return contract;
+}
+
+// --- Endpoints ---
+
+// 1. Event Ingestor
+app.post('/api/event', (req, res) => {
+    const event = req.body as UserEvent;
+    console.log(`[Event] ${event.event_type} from ${event.session_id}`);
+
+    // 0. Rate Limiting (Prevent Flooding)
+    const lastEventTime = getLastEventTime(event.session_id);
+    const now = Date.now();
+    if (now - lastEventTime < 300) { // 300ms throttle per session
+        console.warn(`[Throttle] Dropped event from ${event.session_id} (Too fast)`);
+        res.json(activeSessions.get(event.session_id) || null); // Return last known state logic
+        return;
+    }
+    setLastEventTime(event.session_id, now);
+
+    // 1. Analyze
+    const contract = generateContract(event);
+    activeSessions.set(event.session_id, contract);
+
+    // 2. Generate Narrative (Thought Process)
+    const narrative = generateNarrative(event, contract);
+
+    // 2. Broadcast to Dashboard
+    const broadcastMsg = JSON.stringify({ type: 'analysis_update', event, contract, narrative });
+    dashboardClients.forEach(client => {
+        if (client.readyState === WebSocket.OPEN) {
+            client.send(broadcastMsg);
+        }
+    });
+
+    // 3. Return Contract to Sales Agent (Client)
+    res.json(contract);
+});
+
+// 2. Dashboard Stream
+wss.on('connection', (ws) => {
+    console.log('Dashboard connected');
+    dashboardClients.add(ws);
+    ws.on('close', () => dashboardClients.delete(ws));
+});
+
+const PORT = 3000;
+server.listen(PORT, () => {
+    console.log(`Analyst Server running on http://localhost:${PORT}`);
+});
+function generateNarrative(event: UserEvent, contract: AnalystContract): string[] {
+    const logs: string[] = [];
+    const time = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const timestamp = `[${time}]`;
+
+    // 1. User Activity Tracking (TRACKING prefix)
+    if (event.event_type === 'view_item') {
+        logs.push(timestamp);
+        logs.push(`TRACKING: Page loaded: "${event.payload?.name || 'Product Page'}"`);
+        logs.push('');
+        logs.push(timestamp);
+        logs.push(`TRACKING: Customer viewing "${event.payload?.name}" priced at $${event.payload?.price}`);
+    }
+    else if (event.event_type === 'add_to_cart') {
+        logs.push(timestamp);
+        logs.push(`TRACKING: "${event.payload?.product_id}" added to cart`);
+    }
+    else if (event.event_type === 'remove_from_cart') {
+        logs.push(timestamp);
+        logs.push(`TRACKING: Item removed from cart`);
+        if (contract.friction_types.some(f => f.type === 'confusion')) {
+            logs.push('');
+            logs.push(timestamp);
+            logs.push(`ANALYST: DETECTED CONFUSION: Add/Remove cycle observed`);
+        }
+    }
+    else if (event.event_type === 'search') {
+        logs.push(timestamp);
+        logs.push(`TRACKING: Search query detected: "${event.payload?.query}"`);
+    }
+    else if (event.event_type === 'search_zero_results') {
+        logs.push(timestamp);
+        logs.push(`TRACKING: Search yielded ZERO results`);
+        logs.push('');
+        logs.push(timestamp);
+        logs.push(`ANALYST: FRUSTRATION SIGNAL DETECTED via Zero Interaction`);
+    }
+    else if (event.event_type === 'click' && event.payload?.target === 'filter') {
+        logs.push(timestamp);
+        logs.push(`TRACKING: Filter criteria changed: ${event.payload?.filter}`);
+        if (contract.friction_types.some(f => f.type === 'indecision')) {
+            logs.push('');
+            logs.push(timestamp);
+            logs.push(`ANALYST: DETECTED INDECISION: Rapid filter switching`);
+        }
+    }
+    else if (event.event_type === 'add_to_wishlist') {
+        const action = event.payload?.action || 'add';
+        logs.push(timestamp);
+        if (action === 'add') {
+            logs.push(`TRACKING: Customer added "${event.payload?.product_id}" to WISHLIST`);
+            logs.push('');
+            logs.push(timestamp);
+            logs.push(`ANALYST: HIGH INTEREST signal detected (Confidence: ${(contract.intent_state.confidence * 100).toFixed(0)}%)`);
+        } else {
+            logs.push(`TRACKING: Customer removed item from wishlist`);
+        }
+    }
+    else if (event.event_type === 'hover' && event.payload?.element === 'price') {
+        logs.push(timestamp);
+        logs.push(`TRACKING: User evaluating Price Tag ($${event.payload?.price || '??'})`);
+        logs.push('');
+        logs.push(timestamp);
+        logs.push(`ANALYST: Price sensitivity friction detected`);
+    }
+    // P0 New Events Narrative
+    else if (event.event_type === 'product_detail') {
+        logs.push(timestamp);
+        if (event.payload?.action === 'opened') {
+            logs.push(`TRACKING: Product modal opened - "${event.payload?.product_name}"`);
+        } else if (event.payload?.action === 'description_expanded') {
+            logs.push(`TRACKING: User expanded product description (HIGH INTEREST)`);
+            logs.push('');
+            logs.push(timestamp);
+            logs.push(`ANALYST: STRONG INTEREST signal - User reading full description`);
+        } else if (event.payload?.action === 'quantity_increased') {
+            logs.push(`TRACKING: Quantity increased to ${event.payload?.quantity}`);
+        } else if (event.payload?.action === 'quantity_decreased') {
+            logs.push(`TRACKING: Quantity decreased (HESITATION signal)`);
+        } else if (event.payload?.action === 'add_to_cart') {
+            logs.push(`TRACKING: Added to cart from modal - Qty: ${event.payload?.quantity}`);
+        } else if (event.payload?.action === 'closed') {
+            const timeSpent = Math.round(event.payload?.time_spent_ms / 1000);
+            logs.push(`TRACKING: Modal closed after ${timeSpent}s`);
+            if (timeSpent > 30) {
+                logs.push('');
+                logs.push(timestamp);
+                logs.push(`ANALYST: High engagement detected (${timeSpent}s in modal)`);
+            }
+        } else if (event.payload?.action === 'add_to_wishlist') {
+            logs.push(`TRACKING: Product added to wishlist from modal`);
+        } else {
+            logs.push(`TRACKING: Product modal interaction - ${event.payload?.action}`);
+        }
+    }
+    else if (event.event_type === 'element_hover') {
+        const duration = Math.round(event.payload?.hover_duration_ms / 1000);
+        logs.push(timestamp);
+        logs.push(`TRACKING: User hovering on ${event.payload?.element_type} for ${duration}s`);
+        if (event.payload?.element_type === 'product_price' && duration > 2) {
+            logs.push('');
+            logs.push(timestamp);
+            logs.push(`ANALYST: Price evaluation detected - possible sensitivity`);
+        }
+    }
+    else if (event.event_type === 'cart_action') {
+        logs.push(timestamp);
+        if (event.payload?.action === 'item_added') {
+            logs.push(`TRACKING: Cart updated - Item added (Qty: ${event.payload?.quantity})`);
+            logs.push('');
+            logs.push(timestamp);
+            logs.push(`ANALYST: PURCHASE INTENT detected (Confidence: 90%)`);
+        } else if (event.payload?.action === 'item_removed') {
+            logs.push(`TRACKING: Item removed from cart`);
+        }
+    }
+    else if (event.event_type === 'similar_product_clicked') {
+        logs.push(timestamp);
+        logs.push(`TRACKING: User clicked similar product: ${event.payload?.product_id}`);
+        if (contract.friction_types.some(f => f.type === 'indecision' && f.evidence.includes('comparison_loop'))) {
+            logs.push('');
+            logs.push(timestamp);
+            logs.push(`ANALYST: COMPARISON LOOP detected - User stuck comparing products`);
+        }
+    }
+    else if (event.event_type === 'browsing_pattern') {
+        logs.push(timestamp);
+        const pattern = event.payload?.pattern;
+        const metrics = event.payload?.metrics;
+        logs.push(`TRACKING: Browsing pattern detected: ${pattern}`);
+        if (pattern === 'scroll_without_click') {
+            logs.push(`TRACKING: User scrolled ${metrics?.scroll_count} times without clicking`);
+            logs.push('');
+            logs.push(timestamp);
+            logs.push(`ANALYST: LOW ENGAGEMENT - User not finding relevant products`);
+        } else if (pattern === 'searching_frustrated') {
+            logs.push(`TRACKING: ${metrics?.searches_made} searches with no product clicks`);
+            logs.push('');
+            logs.push(timestamp);
+            logs.push(`ANALYST: SEARCH FRUSTRATION - Intervention recommended`);
+        }
+    }
+    else if (event.event_type === 'search_action') {
+        logs.push(timestamp);
+        if (event.payload?.action === 'typing') {
+            logs.push(`TRACKING: Search query: "${event.payload?.query}" (${event.payload?.time_to_type}ms)`);
+        } else if (event.payload?.action === 'focus') {
+            logs.push(`TRACKING: User focused on search bar`);
+        } else {
+            logs.push(`TRACKING: Search action - ${event.payload?.action}`);
+        }
+    }
+    else if (event.event_type === 'attention') {
+        logs.push(timestamp);
+        const signal = event.payload?.signal;
+        if (signal === 'tab_hidden') {
+            logs.push(`TRACKING: User switched to another tab (comparison shopping?)`);
+        } else if (signal === 'tab_visible') {
+            logs.push(`TRACKING: User returned to tab`);
+        } else if (signal === 'window_focused') {
+            logs.push(`TRACKING: Browser window focused`);
+        } else if (signal === 'window_blurred') {
+            logs.push(`TRACKING: Browser window lost focus`);
+        } else {
+            logs.push(`TRACKING: Attention signal - ${signal}`);
+        }
+    }
+    else if (event.event_type === 'cursor_stream') {
+        logs.push(timestamp);
+        logs.push(`TRACKING: Cursor movement data collected (${event.payload?.count} samples)`);
+    }
+    else if (event.event_type === 'filter_usage') {
+        logs.push(timestamp);
+        if (event.payload?.pattern === 'rapid_change') {
+            logs.push(`TRACKING: Rapid filter changes detected (${event.payload?.count} changes)`);
+            logs.push('');
+            logs.push(timestamp);
+            logs.push(`ANALYST: INDECISION pattern - User cannot find right product`);
+        } else {
+            logs.push(`TRACKING: Filter applied: ${event.payload?.filter}`);
+        }
+    }
+    else if (event.event_type === 'network_speed') {
+        logs.push(timestamp);
+        logs.push(`TRACKING: Network speed: ${event.payload?.effective_type} (${event.payload?.downlink}Mbps)`);
+        if (event.payload?.effective_type === 'slow-2g' || event.payload?.effective_type === '2g') {
+            logs.push('');
+            logs.push(timestamp);
+            logs.push(`ANALYST: SLOW NETWORK detected - May impact user experience`);
+        }
+    }
+    else if (event.event_type === 'device_context') {
+        logs.push(timestamp);
+        logs.push(`TRACKING: Device: ${event.payload?.device_type} (${event.payload?.viewport_width}x${event.payload?.viewport_height})`);
+    }
+    else if (event.event_type === 'exit_intent') {
+        logs.push(timestamp);
+        logs.push(`TRACKING: Mouse cursor left viewport`);
+        logs.push('');
+        logs.push(timestamp);
+        logs.push(`ANALYST: ⚠️ EXIT INTENT DETECTED`);
+    }
+    else if (event.event_type === 'click_rage') {
+        logs.push(timestamp);
+        logs.push(`TRACKING: Rapid clicking detected on element`);
+        logs.push('');
+        logs.push(timestamp);
+        logs.push(`ANALYST: FRUSTRATION signal - user experiencing difficulty`);
+    }
+    else if (event.event_type === 'scroll' || event.event_type === 'scroll_depth') {
+        // Skip logging for scroll events - too noisy
+    }
+    else if (event.event_type === 'heartbeat') {
+        // Skip logging for heartbeat - too noisy
+    }
+    else if (event.event_type === 'idle') {
+        logs.push(timestamp);
+        logs.push(`TRACKING: Event captured - idle`);
+    }
+    else if (event.event_type === 'session_journey') {
+        // Skip logging - aggregated journey data
+    }
+    else {
+        logs.push(timestamp);
+        logs.push(`TRACKING: Event captured - ${event.event_type}`);
+    }
+
+    // 2. Intervention Generation
+    const action = contract.recommended_actions[0];
+    if (action && action.action_type !== 'none') {
+        logs.push('');
+        logs.push(timestamp);
+        logs.push(`ANALYST: >>> GENERATING INTERVENTION`);
+        logs.push('');
+        logs.push(timestamp);
+        logs.push(`ANALYST: Action: ${action.action_type.replace('_', ' ')}`);
+        logs.push(`ANALYST: "${action.message_template}"`);
+    }
+
+    return logs;
+}

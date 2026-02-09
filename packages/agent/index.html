@@ -1,0 +1,745 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>StyleHub | Premium Fashion</title>
+    <!-- Using Tailwind CDN for guaranteed styling in this demo view -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .price-tag {
+            transition: all 0.3s ease;
+        }
+
+        .price-tag:hover {
+            color: #fbbf24;
+            /* Amber-400 */
+            transform: scale(1.05);
+            text-shadow: 0 0 10px rgba(251, 191, 36, 0.5);
+        }
+    </style>
+</head>
+
+<body
+    class="antialiased min-h-screen flex flex-col bg-gradient-to-br from-stone-950 via-neutral-900 to-stone-900 text-white selection:bg-amber-500 selection:text-black">
+
+    <!-- Navbar -->
+    <nav class="border-b border-white/10 bg-black/20 backdrop-blur-md sticky top-0 z-40">
+        <div class="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
+            <div class="flex items-center gap-2">
+                <div class="w-6 h-6 bg-gradient-to-tr from-amber-400 to-orange-500 rounded-none transform rotate-45">
+                </div>
+                <span class="font-bold text-xl tracking-tight ml-2">StyleHub</span>
+            </div>
+            <div class="hidden md:flex gap-8 text-sm font-medium text-gray-300">
+                <a href="/" class="hover:text-white transition-colors">Home</a>
+                <a href="#" class="nav-category hover:text-amber-400 transition-colors" data-cat="clothing">Clothing</a>
+                <a href="#" class="nav-category hover:text-amber-400 transition-colors" data-cat="footwear">Footwear</a>
+                <a href="#" class="nav-category hover:text-amber-400 transition-colors" data-cat="watches">Watches</a>
+                <a href="#" class="nav-category hover:text-amber-400 transition-colors"
+                    data-cat="accessories">Accessories</a>
+            </div>
+            <div class="flex gap-4 text-gray-300 items-center">
+                <!-- ... existing search/cart/user ... -->
+                <div class="relative">
+                    <input type="text" id="store-search" placeholder="Search..."
+                        class="bg-white/10 border-none rounded-none px-4 py-1 text-sm text-white focus:ring-1 focus:ring-amber-500 outline-none w-32 focus:w-48 transition-all" />
+                    <div id="search-dropdown" class="hidden absolute top-full left-0 mt-2 w-64 z-50">
+                        <div class="bg-stone-900/95 backdrop-blur-xl border border-white/20 rounded-lg shadow-2xl p-2 grid gap-1 custom-scrollbar max-h-60 overflow-y-auto"
+                            id="search-results"></div>
+                    </div>
+                </div>
+
+                <button class="hover:text-white flex items-center gap-2"
+                    onclick="window.location.href='/checkout.html'">
+                    <span class="text-xs text-gray-400">Total: <span id="cart-total"
+                            class="text-amber-400 font-mono font-bold">$0.00</span></span>
+                    <span>Cart (<span id="cart-count">0</span>)</span>
+                </button>
+
+                <!-- User Profile Menu -->
+                <div class="relative ml-2">
+                    <button id="user-menu-btn"
+                        class="w-8 h-8 rounded-full bg-stone-700 flex items-center justify-center text-xs font-bold border border-white/20 hover:ring-2 ring-amber-400 transition">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
+                            stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                            class="text-gray-300">
+                            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                            <circle cx="12" cy="7" r="4"></circle>
+                        </svg>
+                    </button>
+                    <div id="user-dropdown"
+                        class="hidden absolute top-full right-0 mt-2 w-48 bg-stone-900/95 backdrop-blur-xl border border-white/10 rounded-lg shadow-2xl overflow-hidden z-50">
+                        <div class="p-4 border-b border-white/10">
+                            <p class="font-bold text-white text-sm">User</p>
+                        </div>
+                        <div class="p-1">
+                            <button
+                                class="w-full text-left px-3 py-2 text-sm text-gray-400 hover:text-white hover:bg-white/10 rounded transition">Sign
+                                In</button>
+                            <button
+                                onclick="fetch('http://localhost:3000/api/reset', {method:'POST'}).then(() => { localStorage.clear(); sessionStorage.clear(); window.location.reload(); })"
+                                class="w-full text-left px-3 py-2 text-sm text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded transition">Clear
+                                Session</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- ... (Hero Section unchanged) ... -->
+    <header class="relative overflow-hidden h-[500px] flex items-center border-b border-white/10">
+        <div
+            class="absolute top-0 right-0 w-[600px] h-[600px] bg-amber-600/10 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2 pointer-events-none">
+        </div>
+
+        <div class="max-w-7xl mx-auto px-6 w-full grid grid-cols-1 md:grid-cols-2 gap-10 items-center relative z-10">
+            <div>
+                <span class="text-amber-400 text-sm font-bold tracking-wider uppercase mb-2 block animate-pulse">New
+                    Season</span>
+                <h1
+                    class="text-6xl font-extrabold leading-tight mb-6 bg-clip-text text-transparent bg-gradient-to-r from-amber-100 to-amber-400">
+                    Redefine Your<br>Signature Look.
+                </h1>
+                <p class="text-gray-300 text-lg mb-8 max-w-md">Discover our curated collection of timeless fashion
+                    pieces designed for the modern individual.</p>
+                <div class="flex gap-4">
+                    <button
+                        class="bg-white text-black px-8 py-3 rounded-none font-bold hover:bg-amber-50 transition shadow-lg shadow-amber-500/20">Shop
+                        Collection</button>
+                    <button
+                        class="border border-white/20 px-8 py-3 rounded-none font-bold hover:bg-white/10 transition backdrop-blur-sm">View
+                        Lookbook</button>
+                </div>
+            </div>
+            <div class="h-96 rounded-2xl flex items-center justify-center relative group overflow-hidden">
+                <img src="https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?q=80&w=800" alt="Fashion Model"
+                    class="h-full w-full object-cover object-top drop-shadow-2xl group-hover:scale-105 transition duration-700 ease-in-out opacity-90">
+            </div>
+        </div>
+    </header>
+
+    <!-- Filters Bar (Behavior: Filter Loops) -->
+    <div class="max-w-7xl mx-auto px-6 py-4 flex gap-4 items-center overflow-x-auto">
+        <span class="text-sm font-bold text-gray-400">Filter By:</span>
+        <button class="filter-btn px-4 py-1 rounded-none border border-white/50 bg-white/20 text-xs transition"
+            data-filter="all">View All</button>
+        <button class="filter-btn px-4 py-1 rounded-none border border-white/20 hover:bg-white/10 text-xs transition"
+            data-filter="under-50">Under $50</button>
+        <button class="filter-btn px-4 py-1 rounded-none border border-white/20 hover:bg-white/10 text-xs transition"
+            data-filter="50-150">$50 - $150</button>
+        <button class="filter-btn px-4 py-1 rounded-none border border-white/20 hover:bg-white/10 text-xs transition"
+            data-filter="premium">Designer ($200+)</button>
+        <button class="filter-btn px-4 py-1 rounded-none border border-white/20 hover:bg-white/10 text-xs transition"
+            data-filter="sale">New Season</button>
+    </div>
+
+    <!-- Categories / Products -->
+    <main class="max-w-7xl mx-auto px-6 py-8 flex-grow relative z-10 w-full">
+
+        <div class="flex items-end justify-between mb-8">
+            <h2 class="text-2xl font-bold font-serif italic" id="grid-title">Trending Now</h2>
+            <span class="text-sm text-gray-400" id="result-count">Showing Top Picks</span>
+        </div>
+
+        <!-- DYNAMIC PRODUCT GRID -->
+        <div id="product-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-16">
+            <!-- Rendered via JS -->
+        </div>
+
+    </main>
+
+    <!-- PRODUCT DETAIL POPUP COMPONENT (Hidden by default) -->
+    <div id="product-modal" class="fixed inset-0 z-[100] hidden">
+        <!-- Backdrop -->
+        <div class="absolute inset-0 bg-black/80 backdrop-blur-sm transition-opacity" onclick="closeModal()"></div>
+
+        <!-- Modal Content -->
+        <div class="absolute inset-0 flex items-center justify-center p-4 pointer-events-none">
+            <div
+                class="bg-stone-900 border border-white/10 w-full max-w-4xl max-h-[90vh] rounded-lg shadow-2xl overflow-y-auto pointer-events-auto flex flex-col md:flex-row relative animate-scaleIn">
+
+                <!-- Close Button -->
+                <button
+                    class="absolute top-4 right-4 z-10 w-8 h-8 rounded-full bg-black/40 hover:bg-white/20 flex items-center justify-center text-white transition"
+                    onclick="closeModal()">✕</button>
+
+                <!-- Left: Image -->
+                <div class="w-full md:w-1/2 bg-black/30 p-0 flex items-center justify-center relative overflow-hidden">
+                    <img id="modal-image"
+                        src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
+                        class="w-full h-full object-cover">
+                </div>
+
+                <!-- Right: Details -->
+                <div class="w-full md:w-1/2 p-8 flex flex-col">
+                    <span id="modal-category"
+                        class="text-amber-400 text-xs font-bold uppercase tracking-wider mb-2">Category</span>
+                    <h2 id="modal-title" class="text-3xl font-bold mb-2 font-serif">Product Name</h2>
+                    <div class="flex items-center gap-4 mb-6">
+                        <span id="modal-price" class="text-2xl font-bold text-white">$0.00</span>
+                        <div class="flex text-amber-500 text-sm">★★★★☆ <span class="text-gray-500 ml-1">(42)</span>
+                        </div>
+                    </div>
+
+                    <!-- Description -->
+                    <div class="mb-6">
+                        <p id="modal-desc" class="text-gray-300 text-sm leading-relaxed line-clamp-3">
+                            Experience premium quality with our latest generation technology. Designed for professionals
+                            and enthusiasts alike, this product delivers exceptional performance.
+                        </p>
+                        <button id="modal-read-more"
+                            class="text-xs text-amber-400 hover:text-amber-300 mt-1 font-bold">Read More</button>
+                    </div>
+
+                    <!-- Options -->
+                    <div class="space-y-4 mb-8">
+                        <div>
+                            <span class="text-xs text-gray-500 uppercase font-bold block mb-2">Color</span>
+                            <div class="flex gap-2">
+                                <button
+                                    class="w-8 h-8 rounded-full bg-stone-200 border-2 border-transparent hover:border-amber-500 focus:border-amber-500 ring-2 ring-transparent focus:ring-amber-500/50 transition"></button>
+                                <button
+                                    class="w-8 h-8 rounded-full bg-stone-800 border-2 border-transparent hover:border-amber-500 focus:border-amber-500 ring-2 ring-transparent focus:ring-amber-500/50 transition"></button>
+                                <button
+                                    class="w-8 h-8 rounded-full bg-amber-900 border-2 border-transparent hover:border-amber-500 focus:border-amber-500 ring-2 ring-transparent focus:ring-amber-500/50 transition"></button>
+                            </div>
+                        </div>
+                        <div>
+                            <span class="text-xs text-gray-500 uppercase font-bold block mb-2">Quantity</span>
+                            <div class="flex items-center gap-3">
+                                <button class="w-8 h-8 rounded bg-white/10 hover:bg-white/20 text-white font-bold"
+                                    onclick="updateModalQty(-1)">-</button>
+                                <span id="modal-qty" class="font-mono w-4 text-center">1</span>
+                                <button class="w-8 h-8 rounded bg-white/10 hover:bg-white/20 text-white font-bold"
+                                    onclick="updateModalQty(1)">+</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Actions -->
+                    <div class="flex gap-3 mb-8">
+                        <button id="modal-add-cart"
+                            class="flex-1 bg-white text-black font-bold py-3 rounded-none hover:bg-amber-50 transition shadow-lg shadow-amber-500/20 active:scale-95 flex items-center justify-center gap-2">
+                            <span>Add to Cart</span>
+                        </button>
+                        <button id="modal-wishlist-btn"
+                            class="w-12 rounded-none border border-white/20 flex items-center justify-center hover:bg-white/10 hover:border-amber-500 hover:text-amber-500 transition group"
+                            title="Add to Wishlist">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24"
+                                fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                                stroke-linejoin="round" class="group-hover:fill-amber-500 transition-colors">
+                                <path
+                                    d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z">
+                                </path>
+                            </svg>
+                        </button>
+                    </div>
+
+                    <div class="h-px bg-white/10 w-full mb-6"></div>
+
+                    <!-- Pop-up Similar Products -->
+                    <div>
+                        <h4 class="text-sm font-bold text-gray-400 mb-4">You May Also Like</h4>
+                        <div id="modal-similar" class="grid grid-cols-3 gap-3">
+                            <!-- Injected JS -->
+                        </div>
+                    </div>
+
+                    <div class="h-px bg-white/10 w-full my-6"></div>
+
+                    <!-- Customer Reviews -->
+                    <div>
+                        <h4 class="text-sm font-bold text-gray-400 mb-4">Customer Reviews</h4>
+                        <div id="modal-reviews" class="space-y-4">
+                            <!-- Injected JS -->
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="border-t border-white/10 py-12 bg-black/40 text-sm">
+        <div class="max-w-7xl mx-auto px-6 grid grid-cols-1 md:grid-cols-4 gap-8 mb-8">
+            <div>
+                <h3 class="text-white font-serif font-bold mb-4">StyleHub</h3>
+                <p class="text-gray-500">Curated fashion for the modern era. Quality, sustainability, and style in every
+                    stitch.</p>
+            </div>
+            <div>
+                <h4 class="text-white font-bold mb-4">Shop</h4>
+                <div class="flex flex-col gap-2 text-gray-500">
+                    <a href="#" class="hover:text-amber-400 transition"
+                        onclick="window.DemoTrigger('page_navigation', {page_name: 'New Arrivals'})">New Arrivals</a>
+                    <a href="#" class="hover:text-amber-400 transition"
+                        onclick="window.DemoTrigger('page_navigation', {page_name: 'Best Sellers'})">Best Sellers</a>
+                    <a href="#" class="hover:text-amber-400 transition" data-analyze="gift-guide">Gift Guide</a>
+                </div>
+            </div>
+            <div>
+                <h4 class="text-white font-bold mb-4">Support</h4>
+                <div class="flex flex-col gap-2 text-gray-500">
+                    <a href="#" class="hover:text-amber-400 transition" data-analyze="shipping">Shipping Info</a>
+                    <a href="#" class="hover:text-amber-400 transition" data-analyze="returns">Returns Policy</a>
+                    <a href="#" class="hover:text-amber-400 transition">FAQ</a>
+                </div>
+            </div>
+            <div>
+                <h4 class="text-white font-bold mb-4">Company</h4>
+                <div class="flex flex-col gap-2 text-gray-500">
+                    <a href="#" class="hover:text-amber-400 transition" data-analyze="about">About Us</a>
+                    <a href="#" class="hover:text-amber-400 transition">Careers</a>
+                    <a href="#" class="hover:text-amber-400 transition">Press</a>
+                </div>
+            </div>
+        </div>
+        <div class="text-center text-gray-600 border-t border-white/5 pt-8">
+            &copy; 2026 StyleHub Fashion. <span class="mx-2">|</span> Verified Secure
+        </div>
+    </footer>
+
+    <!-- The Widget Mount Point -->
+    <div id="sales-agent-root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+
+    <!-- MAIN APP LOGIC -->
+    <script type="module">
+        import { ALL_PRODUCTS, searchProducts, getProductsByCategory } from '/src/store/products.ts';
+        import { addToCart, removeFromCart, getCartCount, getCartTotal, subscribe } from '/src/store/store.ts';
+
+        const grid = document.getElementById('product-grid');
+        const cartCountEl = document.getElementById('cart-count');
+
+        // 1. Render Function
+        function render(products) {
+            grid.innerHTML = '';
+            document.getElementById('result-count').innerText = `Showing ${products.length} Products`;
+
+            products.forEach(p => {
+                const card = document.createElement('div');
+                card.className = "glass-panel p-0 rounded-none group relative overflow-hidden product-card hover:bg-white/5 transition";
+                card.dataset.id = p.id;
+
+                // Low Stock Badge
+                let badge = '';
+                if (p.stock && p.stock < 5) {
+                    badge = `<div class="absolute top-2 right-2 bg-amber-600 text-white text-[10px] uppercase font-bold px-2 py-0.5 shadow z-10 animate-pulse">Low Stock</div>`;
+                }
+
+                card.innerHTML = `
+                    ${badge}
+                    <div class="aspect-[3/4] bg-black/20 mb-0 flex items-center justify-center overflow-hidden cursor-pointer product-trigger relative">
+                        <img src="${p.image}" alt="${p.name}" loading="lazy" class="w-full h-full object-cover group-hover:scale-105 transition duration-700">
+                         <button class="btn-add absolute bottom-4 right-4 bg-white text-black hover:bg-amber-100 w-10 h-10 flex items-center justify-center rounded-none shadow-lg transition opacity-0 group-hover:opacity-100 translate-y-4 group-hover:translate-y-0 duration-300" data-id="${p.id}" data-added="false">+</button>
+                    </div>
+                    <div class="p-4">
+                        <p class="text-amber-400 text-[10px] uppercase font-bold tracking-widest mb-1">${p.category}</p>
+                        <h3 class="font-bold text-lg mb-1 truncate cursor-pointer hover:text-amber-300 transition product-trigger font-serif">${p.name}</h3>
+                        
+                        <div class="flex items-center justify-between mt-3">
+                            <div class="price-tag cursor-help font-bold text-lg text-white" data-analyze="price" title="Trigger Price Sensitivity">$${p.price.toFixed(2)}</div>
+                        </div>
+
+                         <button class="text-xs text-gray-500 hover:text-gray-300 mt-2 underline specs-toggle">Details</button>
+                        <div class="specs-panel hidden text-[10px] text-gray-400 mt-2 bg-white/5 p-2 border-l-2 border-amber-500">
+                            ${p.specs.join('<br>')}
+                        </div>
+                    </div>
+                `;
+
+                // Attach Click Event for Modal
+                card.querySelectorAll('.product-trigger').forEach(el => {
+                    el.addEventListener('click', () => openModal(p));
+                });
+
+                grid.appendChild(card);
+            });
+
+            // Re-attach Demo Listeners
+            attachDemoListeners();
+        }
+
+        // --- MODAL LOGIC ---
+        const modal = document.getElementById('product-modal');
+        let currentModalQty = 1;
+
+        window.closeModal = () => {
+            if (modalOpenTime && window.DemoTrigger) {
+                const timeSpent = Date.now() - modalOpenTime;
+                window.DemoTrigger('product_detail', {
+                    action: 'closed',
+                    time_spent_ms: timeSpent,
+                    images_viewed_count: imagesViewedCount
+                });
+            }
+            modal.classList.add('hidden');
+            modalOpenTime = null;
+        };
+
+        window.updateModalQty = (change) => {
+            const previousQty = currentModalQty;
+            currentModalQty += change;
+            if (currentModalQty < 1) currentModalQty = 1;
+            document.getElementById('modal-qty').innerText = currentModalQty;
+
+            // Track quantity changes
+            if (window.DemoTrigger && change !== 0) {
+                window.DemoTrigger('product_detail', {
+                    action: change > 0 ? 'quantity_increased' : 'quantity_decreased',
+                    quantity: currentModalQty
+                });
+            }
+        };
+
+        // Track modal timing
+        let modalOpenTime = null;
+        let imagesViewedCount = 0;
+
+        function openModal(p) {
+            modalOpenTime = Date.now();
+            imagesViewedCount = 1; // First image automatically viewed
+            currentModalQty = 1;
+            document.getElementById('modal-qty').innerText = 1;
+            document.getElementById('modal-image').src = p.image;
+            document.getElementById('modal-category').innerText = p.category;
+            document.getElementById('modal-title').innerText = p.name;
+            document.getElementById('modal-price').innerText = '$' + p.price.toFixed(2);
+            document.getElementById('modal-desc').className = "text-gray-300 text-sm leading-relaxed line-clamp-3";
+
+            // Add to Cart in Modal
+            const addBtn = document.getElementById('modal-add-cart');
+            addBtn.onclick = () => {
+                addToCart(p.id);
+                addBtn.innerHTML = `<span>Added to Bag</span>`;
+                setTimeout(() => addBtn.innerHTML = `<span>Add to Cart</span>`, 1000);
+                if (window.DemoTrigger) {
+                    window.DemoTrigger('product_detail', {
+                        action: 'add_to_cart',
+                        product_id: p.id,
+                        product_name: p.name,
+                        product_price: p.price,
+                        quantity: currentModalQty
+                    });
+                    window.DemoTrigger('cart_action', {
+                        action: 'item_added',
+                        product_id: p.id,
+                        quantity: currentModalQty,
+                        location: 'modal'
+                    });
+                }
+            };
+
+            // Wishlist Button - Track state per product
+            const wishlistBtn = document.getElementById('modal-wishlist-btn');
+            const wishlistState = window.wishlistState || new Map();
+            if (!window.wishlistState) window.wishlistState = wishlistState;
+
+            const isWishlisted = wishlistState.get(p.id) || false;
+            const svg = wishlistBtn.querySelector('svg');
+
+            // Set initial state based on saved state
+            if (isWishlisted) {
+                svg.style.fill = '#f59e0b'; // Amber-500
+                svg.style.stroke = '#f59e0b';
+                wishlistBtn.classList.add('bg-amber-500/10', 'border-amber-500');
+            } else {
+                svg.style.fill = 'none';
+                svg.style.stroke = 'currentColor';
+                wishlistBtn.classList.remove('bg-amber-500/10', 'border-amber-500');
+            }
+
+            wishlistBtn.onclick = () => {
+                const currentState = wishlistState.get(p.id) || false;
+                const newState = !currentState;
+                wishlistState.set(p.id, newState);
+
+                if (newState) {
+                    svg.style.fill = '#f59e0b';
+                    svg.style.stroke = '#f59e0b';
+                    wishlistBtn.classList.add('bg-amber-500/10', 'border-amber-500');
+                } else {
+                    svg.style.fill = 'none';
+                    svg.style.stroke = 'currentColor';
+                    wishlistBtn.classList.remove('bg-amber-500/10', 'border-amber-500');
+                }
+                if (window.DemoTrigger) {
+                    window.DemoTrigger('product_detail', {
+                        action: 'add_to_wishlist',
+                        product_id: p.id,
+                        product_name: p.name
+                    });
+                    window.DemoTrigger('add_to_wishlist', { product_id: p.id, action: newState ? 'add' : 'remove' });
+                }
+            };
+
+            // Read More Toggle - HIGH INTEREST SIGNAL
+            document.getElementById('modal-read-more').onclick = (e) => {
+                const desc = document.getElementById('modal-desc');
+                if (desc.classList.contains('line-clamp-3')) {
+                    desc.classList.remove('line-clamp-3');
+                    e.target.innerText = "Show Less";
+                    if (window.DemoTrigger) window.DemoTrigger('product_detail', {
+                        action: 'description_expanded',
+                        product_id: p.id,
+                        product_name: p.name,
+                        product_price: p.price
+                    });
+                } else {
+                    desc.classList.add('line-clamp-3');
+                    e.target.innerText = "Read More";
+                }
+            };
+
+            // Similar Products Injection
+            const similarContainer = document.getElementById('modal-similar');
+            const similar = ALL_PRODUCTS
+                .filter(x => x.category === p.category && x.id !== p.id)
+                .sort(() => 0.5 - Math.random()) // Shuffle
+                .slice(0, 3);
+
+            similarContainer.innerHTML = similar.map(s => `
+                <div class="glass-panel p-2 rounded-none hover:bg-white/5 cursor-pointer transition flex flex-col gap-2" onclick="if(window.DemoTrigger) window.DemoTrigger('similar_product_clicked', {product_id: '${s.id}', from_product: '${p.id}'}); window.closeModal(); window.location.hash='${s.id}'">
+                    <div class="aspect-[3/4] bg-black/20 overflow-hidden">
+                        <img src="${s.image}" class="w-full h-full object-cover">
+                    </div>
+                    <div>
+                        <div class="font-bold text-xs truncate font-serif">${s.name}</div>
+                        <div class="text-[10px] text-gray-400">$${s.price}</div>
+                    </div>
+                </div>
+            `).join('');
+
+            // Customer Reviews Injection
+            const reviewsContainer = document.getElementById('modal-reviews');
+            if (p.reviews && p.reviews.length > 0) {
+                reviewsContainer.innerHTML = p.reviews.map(r => `
+                    <div class="bg-white/5 p-3 rounded-none border-l border-amber-500/30">
+                        <div class="flex items-center justify-between mb-1">
+                            <span class="font-bold text-xs text-white">${r.user}</span>
+                            <span class="text-[10px] text-gray-500">${r.date}</span>
+                        </div>
+                        <div class="text-amber-500 text-xs mb-1">
+                            ${'★'.repeat(r.rating)}${'☆'.repeat(5 - r.rating)}
+                        </div>
+                        <p class="text-gray-300 text-xs">${r.text}</p>
+                    </div>
+                `).join('');
+            } else {
+                reviewsContainer.innerHTML = `<p class="text-gray-500 text-xs italic">No reviews yet for this product.</p>`;
+            }
+
+            modal.classList.remove('hidden');
+            if (window.DemoTrigger) {
+                window.DemoTrigger('product_detail', {
+                    action: 'opened',
+                    product_id: p.id,
+                    product_name: p.name,
+                    product_price: p.price
+                });
+            }
+        }
+
+        // ... (rest of attachDemoListeners, search, user menu logic remains same)
+
+        // 2. Demo Listeners (Re-binding for dynamic content)
+        function attachDemoListeners() {
+            // Basic functionality hooks
+            document.querySelectorAll('.specs-toggle').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    const panel = e.target.nextElementSibling;
+                    panel.classList.toggle('hidden');
+                    // Notify Analyst if DemoTrigger exists
+                    if (window.DemoTrigger) {
+                        const productId = e.target.closest('.product-card').dataset.id;
+                        window.DemoTrigger('click', { target: 'specs_toggle', product_id: productId, state: panel.classList.contains('hidden') ? 'closed' : 'open' });
+                    }
+                });
+            });
+
+            document.querySelectorAll('.btn-add').forEach(btn => {
+                btn.onclick = (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const id = btn.dataset.id;
+                    const isAdded = btn.dataset.added === 'true';
+                    if (!isAdded) {
+                        btn.dataset.added = 'true';
+                        btn.textContent = '✓';
+                        btn.classList.remove('bg-white', 'text-black');
+                        btn.classList.add('bg-green-500', 'text-white');
+                        addToCart(id);
+                        if (window.DemoTrigger) window.DemoTrigger('add_to_cart', { product_id: id });
+                    } else {
+                        btn.dataset.added = 'false';
+                        btn.textContent = '+';
+                        btn.classList.add('bg-white', 'text-black');
+                        btn.classList.remove('bg-green-500', 'text-white');
+                        removeFromCart(id);
+                        if (window.DemoTrigger) window.DemoTrigger('remove_from_cart', { product_id: id });
+                    }
+                };
+
+                // Hover Hesitation Trigger (Throttled)
+                let lastBtnHover = 0;
+                btn.onmouseenter = () => {
+                    const now = Date.now();
+                    if (now - lastBtnHover > 5000) { // Max once every 5 seconds
+                        lastBtnHover = now;
+                        if (window.DemoTrigger) window.DemoTrigger('hover', { element: 'add_to_cart_btn', product_id: btn.dataset.id });
+                    }
+                }
+            });
+
+            // Price Dwell
+            document.querySelectorAll('[data-analyze="price"]').forEach(price => {
+                let timer;
+                price.onmouseenter = () => {
+                    timer = setTimeout(() => {
+                        if (window.DemoTrigger) window.DemoTrigger('hover', { element: 'price', duration: 'long', product_id: price.closest('.product-card').dataset.id });
+                    }, 2000);
+                };
+                price.onmouseleave = () => clearTimeout(timer);
+            });
+        }
+
+        // 3. Search & Filter Logic
+        const searchInput = document.getElementById('store-search');
+        const filterBtns = document.querySelectorAll('.filter-btn');
+
+        // Category Links Logic
+        document.querySelectorAll('.nav-category').forEach(link => {
+            link.addEventListener('click', (e) => {
+                e.preventDefault();
+                // Reset filters
+                filterBtns.forEach(b => b.classList.remove('bg-white/20', 'border-white/50'));
+
+                const cat = link.dataset.cat;
+                // Simple category mapping based on products data
+                // Note: This relies on 'getProductsByCategory' potentially, or just filtering ALL_PRODUCTS
+                // Since 'getProductsByCategory' is imported, let's try to use it or manual filter
+                const filtered = ALL_PRODUCTS.filter(p => p.category.toLowerCase().includes(cat) || p.category.toLowerCase() === cat);
+
+                render(filtered);
+                document.getElementById('grid-title').innerText = cat.charAt(0).toUpperCase() + cat.slice(1);
+            });
+        });
+
+        // User Menu Logic
+        const userMenuBtn = document.getElementById('user-menu-btn');
+        const userDropdown = document.getElementById('user-dropdown');
+
+        userMenuBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            userDropdown.classList.toggle('hidden');
+        });
+
+        document.addEventListener('click', () => {
+            if (!userDropdown.classList.contains('hidden')) userDropdown.classList.add('hidden');
+        });
+
+        // Filter Click
+        filterBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                // UI Toggle
+                filterBtns.forEach(b => b.classList.remove('bg-white/20', 'border-white/50'));
+                btn.classList.add('bg-white/20', 'border-white/50');
+                document.getElementById('grid-title').innerText = "Trending Now";
+
+                // Logic
+                const filter = btn.dataset.filter;
+                let filtered = ALL_PRODUCTS;
+
+                if (filter === 'all') filtered = ALL_PRODUCTS;
+                else if (filter === 'under-50') filtered = ALL_PRODUCTS.filter(p => p.price < 50);
+                else if (filter === '50-150') filtered = ALL_PRODUCTS.filter(p => p.price >= 50 && p.price <= 150);
+                else if (filter === 'premium') filtered = ALL_PRODUCTS.filter(p => p.price > 200);
+                else if (filter === 'sale') filtered = ALL_PRODUCTS.filter(p => Math.random() > 0.8);
+
+                render(filtered);
+
+                // Notify Analyst
+                if (window.DemoTrigger) window.DemoTrigger('click', { target: 'filter', filter: filter });
+            });
+        });
+
+        // Search Input
+        searchInput.addEventListener('input', (e) => {
+            const query = e.target.value;
+            const dropdown = document.getElementById('search-dropdown');
+            const resultsDiv = document.getElementById('search-results');
+
+            if (query.length > 1) {
+                const matches = searchProducts(query).slice(0, 5);
+                if (matches.length > 0) {
+                    dropdown.classList.remove('hidden');
+                    resultsDiv.innerHTML = matches.map(m => `
+                            <div class="flex items-center gap-3 p-2 hover:bg-white/10 rounded cursor-pointer transition border border-transparent hover:border-white/5" onclick="window.location.hash='${m.id}'">
+                                <img src="${m.image}" class="w-8 h-8 rounded bg-gray-800 object-cover">
+                                <div>
+                                    <div class="font-bold text-sm text-white font-serif">${m.name}</div>
+                                    <div class="text-xs text-gray-400">$${m.price}</div>
+                                </div>
+                            </div>
+                        `).join('');
+                } else {
+                    dropdown.classList.add('hidden');
+                }
+                render(searchProducts(query));
+            } else {
+                dropdown.classList.add('hidden');
+                if (query.length === 0) render(ALL_PRODUCTS);
+            }
+        });
+
+        // Enter Key
+        searchInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                const query = searchInput.value;
+                document.getElementById('search-dropdown').classList.add('hidden');
+
+
+                if (query.includes('fly') || query.length < 3) {
+                    if (window.DemoTrigger) window.DemoTrigger('search_zero_results', { query });
+                    searchInput.classList.add('ring-2', 'ring-red-500');
+                    setTimeout(() => searchInput.classList.remove('ring-2', 'ring-red-500'), 500);
+                    render([]);
+                } else {
+                    if (window.DemoTrigger) window.DemoTrigger('search', { query });
+                    render(searchProducts(query));
+                }
+            }
+        });
+
+        // 4. Cart State Sync
+        function syncCart() {
+            cartCountEl.innerText = getCartCount();
+            document.getElementById('cart-total').innerText = '$' + getCartTotal().toFixed(2);
+        }
+
+        subscribe(syncCart);
+        syncCart(); // Init
+
+        // Initial Render
+        // Priorities: Demo items first, then others
+        const sorted = [...ALL_PRODUCTS].sort((a, b) => (b.isDemo ? 1 : 0) - (a.isDemo ? 1 : 0));
+        render(sorted);
+
+    </script>
+</body>
+
+</html>

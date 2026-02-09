@@ -1,0 +1,20 @@
+{
+  "name": "virtual-salesman-monorepo",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:server": "npm run dev --workspace=packages/analyst",
+    "dev:widget": "npm run dev --workspace=packages/agent",
+    "start:demo": "npm run dev --workspace=packages/demo-view",
+    "dev:all": "concurrently \"npm run dev:server\" \"npm run dev:widget\" \"npm run start:demo\""
+  },
+  "devDependencies": {
+    "@rollup/rollup-darwin-arm64": "^4.57.1",
+    "concurrently": "^9.2.1"
+  },
+  "dependencies": {
+    "express": "^5.2.1"
+  }
+}

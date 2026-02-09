@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Checkout | TechSpace</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+    </style>
+</head>
+
+<body class="bg-gray-900 text-white min-h-screen flex flex-col">
+
+    <!-- Navbar -->
+    <nav class="border-b border-white/10 bg-black/20 backdrop-blur-md sticky top-0 z-40">
+        <div class="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
+            <div class="flex items-center gap-2 cursor-pointer" onclick="window.location.href='/'">
+                <div class="w-6 h-6 bg-gradient-to-tr from-purple-500 to-pink-500 rounded-sm"></div>
+                <span class="font-bold text-xl tracking-tight">TechSpace</span>
+            </div>
+            <a href="/" class="text-sm text-gray-400 hover:text-white">← Continue Shopping</a>
+        </div>
+    </nav>
+
+    <main class="flex-grow max-w-4xl mx-auto w-full p-6 py-10" id="main-content">
+        <h1 class="text-3xl font-bold mb-8">Secure Checkout</h1>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+
+            <!-- LEFT COLUMN: Cart & Form -->
+            <div class="md:col-span-2 space-y-8">
+
+                <!-- Step 1: Cart Review -->
+                <div class="glass-panel p-6 rounded-xl" id="cart-section">
+                    <h2 class="text-xl font-bold mb-4 flex items-center gap-2">
+                        <span
+                            class="bg-purple-600 text-xs w-6 h-6 rounded-full flex items-center justify-center">1</span>
+                        Your Order
+                    </h2>
+                    <div id="cart-items" class="space-y-4">
+                        <!-- Injected JS -->
+                    </div>
+                    <div id="empty-cart-msg" class="hidden text-center py-8 text-gray-500">
+                        Your cart is empty. <a href="/" class="text-purple-400 underline">Go Shop</a>
+                    </div>
+                </div>
+
+                <!-- Step 2: Shipping & Payment -->
+                <div class="glass-panel p-6 rounded-xl opacity-50 pointer-events-none transition" id="payment-section">
+                    <h2 class="text-xl font-bold mb-4 flex items-center gap-2">
+                        <span class="bg-gray-700 text-xs w-6 h-6 rounded-full flex items-center justify-center"
+                            id="step-2-indicator">2</span>
+                        Shipping & Payment
+                    </h2>
+
+                    <form id="checkout-form" class="space-y-4">
+                        <!-- Contact Information -->
+                        <div class="space-y-4">
+                            <h3 class="text-sm font-semibold text-gray-300">Contact Information</h3>
+                            <div>
+                                <label class="block text-xs text-gray-400 mb-1">Full Name</label>
+                                <input type="text" id="field-fullName"
+                                    class="w-full bg-black/20 border border-white/10 rounded p-2 text-sm focus:border-purple-500 outline-none"
+                                    placeholder="John Doe" required>
+                            </div>
+                            <div>
+                                <label class="block text-xs text-gray-400 mb-1">Email</label>
+                                <input type="email" id="field-email"
+                                    class="w-full bg-black/20 border border-white/10 rounded p-2 text-sm focus:border-purple-500 outline-none"
+                                    placeholder="john.doe@example.com" required>
+                            </div>
+                            <div>
+                                <label class="block text-xs text-gray-400 mb-1">Phone Number</label>
+                                <input type="tel" id="field-phone"
+                                    class="w-full bg-black/20 border border-white/10 rounded p-2 text-sm focus:border-purple-500 outline-none"
+                                    placeholder="+1 (555) 123-4567" required>
+                            </div>
+                            <div>
+                                <label class="block text-xs text-gray-400 mb-1">Country</label>
+                                <input type="text" id="field-country"
+                                    class="w-full bg-black/20 border border-white/10 rounded p-2 text-sm focus:border-purple-500 outline-none"
+                                    placeholder="United States" required>
+                            </div>
+                        </div>
+
+                        <!-- Shipping Address -->
+                        <div class="space-y-4 pt-4 border-t border-white/10">
+                            <h3 class="text-sm font-semibold text-gray-300">Shipping Address</h3>
+                            <div>
+                                <label class="block text-xs text-gray-400 mb-1">Street Address</label>
+                                <input type="text" id="field-address"
+                                    class="w-full bg-black/20 border border-white/10 rounded p-2 text-sm focus:border-purple-500 outline-none"
+                                    placeholder="123 Tech Boulevard" required>
+                            </div>
+                        </div>
+
+                        <!-- Shipping Method -->
+                        <div class="space-y-3 pt-4 border-t border-white/10">
+                            <h3 class="text-sm font-semibold text-gray-300">Shipping Method</h3>
+                            <div class="space-y-2">
+                                <label
+                                    class="flex items-center justify-between glass-panel p-3 rounded cursor-pointer border border-white/10 hover:border-purple-500 transition">
+                                    <div class="flex items-center gap-3">
+                                        <input type="radio" name="shipping" value="standard" class="shipping-option"
+                                            data-name="Standard Shipping" data-cost="5" data-time="48 hrs" checked>
+                                        <div>
+                                            <div class="text-sm font-semibold">Standard Shipping</div>
+                                            <div class="text-xs text-gray-400">Delivery in 48 hours</div>
+                                        </div>
+                                    </div>
+                                    <span class="text-sm font-bold">$5</span>
+                                </label>
+                                <label
+                                    class="flex items-center justify-between glass-panel p-3 rounded cursor-pointer border border-white/10 hover:border-purple-500 transition">
+                                    <div class="flex items-center gap-3">
+                                        <input type="radio" name="shipping" value="fast" class="shipping-option"
+                                            data-name="Fast Shipping" data-cost="15" data-time="24 hrs">
+                                        <div>
+                                            <div class="text-sm font-semibold">Fast Shipping</div>
+                                            <div class="text-xs text-gray-400">Delivery in 24 hours</div>
+                                        </div>
+                                    </div>
+                                    <span class="text-sm font-bold">$15</span>
+                                </label>
+                                <label
+                                    class="flex items-center justify-between glass-panel p-3 rounded cursor-pointer border border-white/10 hover:border-purple-500 transition">
+                                    <div class="flex items-center gap-3">
+                                        <input type="radio" name="shipping" value="very-fast" class="shipping-option"
+                                            data-name="Very Fast Shipping" data-cost="25" data-time="12 hrs">
+                                        <div>
+                                            <div class="text-sm font-semibold">Very Fast Shipping</div>
+                                            <div class="text-xs text-gray-400">Delivery in 12 hours</div>
+                                        </div>
+                                    </div>
+                                    <span class="text-sm font-bold">$25</span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <!-- Delivery Time Slot -->
+                        <div class="space-y-3 pt-4 border-t border-white/10">
+                            <h3 class="text-sm font-semibold text-gray-300">Preferred Delivery Window</h3>
+                            <select id="delivery-slot"
+                                class="delivery-slot w-full bg-black/20 border border-white/10 rounded p-3 text-sm focus:border-purple-500 outline-none">
+                                <option value="morning" data-time="8:00 AM - 12:00 PM">Morning (8:00 AM - 12:00 PM)
+                                </option>
+                                <option value="afternoon" data-time="12:00 PM - 5:00 PM">Afternoon (12:00 PM - 5:00 PM)
+                                </option>
+                                <option value="evening" data-time="5:00 PM - 9:00 PM">Evening (5:00 PM - 9:00 PM)
+                                </option>
+                            </select>
+                        </div>
+
+                        <!-- Payment Method -->
+                        <div class="pt-4 border-t border-white/10">
+                            <label class="block text-xs text-gray-400 mb-2">Payment Method</label>
+                            <div class="flex gap-4">
+                                <label
+                                    class="flex-1 glass-panel p-3 rounded cursor-pointer border-purple-500 border flex items-center gap-2">
+                                    <input type="radio" name="payment" checked>
+                                    <span class="text-sm font-bold">Cash on Delivery</span>
+                                </label>
+                                <label
+                                    class="flex-1 glass-panel p-3 rounded opacity-50 cursor-not-allowed flex items-center gap-2">
+                                    <input type="radio" name="payment" disabled>
+                                    <span class="text-sm text-gray-400">Card (Disabled)</span>
+                                </label>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+
+            </div>
+
+            <!-- RIGHT COLUMN: Summary -->
+            <div class="md:col-span-1">
+                <div class="glass-panel p-6 rounded-xl sticky top-24">
+                    <h3 class="font-bold text-gray-400 text-xs uppercase mb-4">Order Summary</h3>
+                    <div class="space-y-2 text-sm mb-4 border-b border-white/10 pb-4">
+                        <div class="flex justify-between">
+                            <span class="text-gray-400">Subtotal</span>
+                            <span id="summary-subtotal">$0.00</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-gray-400">Shipping</span>
+                            <span class="text-green-400">FREE</span>
+                        </div>
+                        <div
+                            class="flex justify-between font-bold text-white text-lg mt-2 pt-2 border-t border-white/10">
+                            <span>Total</span>
+                            <span id="summary-total">$0.00</span>
+                        </div>
+                    </div>
+                    <button id="btn-submit"
+                        class="w-full bg-purple-600 hover:bg-purple-500 text-white font-bold py-3 rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">
+                        Proceed to Payment
+                    </button>
+                    <p class="text-[10px] text-gray-500 text-center mt-3">Free 30-day returns. Secure checkout.</p>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- SUCCESS STATE (Hidden) -->
+    <div id="success-view"
+        class="hidden min-h-screen flex flex-col items-center justify-center p-6 text-center relative overflow-hidden">
+        <!-- Confetti Canvas -->
+        <canvas id="confetti-canvas" class="absolute inset-0 pointer-events-none z-0"></canvas>
+
+        <div class="relative z-10 flex flex-col items-center">
+            <div
+                class="w-20 h-20 bg-green-500 rounded-full flex items-center justify-center mb-6 shadow-[0_0_50px_rgba(34,197,94,0.5)] animate-bounce">
+                <svg class="w-10 h-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"></path>
+                </svg>
+            </div>
+
+            <h1 class="text-4xl font-bold mb-2">Order Confirmed!</h1>
+
+            <!-- Dynamic Success Message -->
+            <div id="ai-success-msg"
+                class="hidden mb-6 bg-purple-500/20 border border-purple-500/50 px-4 py-2 rounded-full text-purple-300 text-sm font-bold flex items-center gap-2">
+                <span class="w-2 h-2 bg-purple-400 rounded-full animate-pulse"></span>
+                Conversion Saved by Sales Agent
+            </div>
+
+            <p class="text-gray-400 mb-8 max-w-md">Thank you, Alex. Your order <span
+                    class="text-white font-mono">#ORD-9928</span> has been placed successfully.</p>
+            <button onclick="window.location.href='/'"
+                class="bg-white text-black px-8 py-3 rounded-full font-bold hover:bg-purple-50 transition shadow-lg hover:shadow-xl hover:scale-105 transform">
+                Back to Store
+            </button>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+    <script type="module">
+        import { getCart, removeFromCart, clearCart, getCartTotal, getUser } from '/src/store/store.ts';
+
+        const cartContainer = document.getElementById('cart-items');
+        const emptyMsg = document.getElementById('empty-cart-msg');
+        const subtotalEl = document.getElementById('summary-subtotal');
+        const totalEl = document.getElementById('summary-total');
+        const paymentSection = document.getElementById('payment-section');
+        const submitBtn = document.getElementById('btn-submit');
+        const form = document.getElementById('checkout-form');
+        let step = 1;
+
+        function renderCart() {
+            const cart = getCart();
+            cartContainer.innerHTML = '';
+
+            if (cart.length === 0) {
+                emptyMsg.classList.remove('hidden');
+                submitBtn.disabled = true;
+                subtotalEl.innerText = '$0.00';
+                totalEl.innerText = '$0.00';
+                return;
+            } else {
+                emptyMsg.classList.add('hidden');
+                submitBtn.disabled = false;
+            }
+
+            cart.forEach(item => {
+                const el = document.createElement('div');
+                el.className = "flex gap-4 items-center bg-white/5 p-3 rounded-lg";
+                el.innerHTML = `
+                    <div class="w-16 h-16 bg-black/20 rounded overflow-hidden flex-shrink-0">
+                        <img src="${item.image}" class="w-full h-full object-cover">
+                    </div>
+                    <div class="flex-grow">
+                        <h4 class="font-bold text-sm line-clamp-1">${item.name}</h4>
+                        <div class="text-xs text-gray-400">$${item.price.toFixed(2)} x ${item.quantity}</div>
+                    </div>
+                    <div class="font-bold text-sm">$${(item.price * item.quantity).toFixed(2)}</div>
+                    <button class="text-red-400 hover:text-red-300 p-1 remove-btn" data-id="${item.id}">×</button>
+                `;
+                cartContainer.appendChild(el);
+            });
+
+            // Summary
+            const total = getCartTotal();
+            const formatted = `$${total.toFixed(2)}`;
+            subtotalEl.innerText = formatted;
+            totalEl.innerText = formatted;
+
+            // Bind Remove
+            document.querySelectorAll('.remove-btn').forEach(btn => {
+                btn.onclick = () => {
+                    removeFromCart(btn.dataset.id);
+                    renderCart(); // Re-render
+                };
+            });
+        }
+
+        // Send tracking event
+        async function sendEvent(eventType, payload = {}) {
+            try {
+                const sessionId = window.sessionStorage.getItem('analyst_session_id') || Date.now().toString();
+                window.sessionStorage.setItem('analyst_session_id', sessionId);
+
+                const event = {
+                    session_id: sessionId,
+                    event_type: eventType,
+                    url: window.location.href,
+                    timestamp: new Date().toISOString(),
+                    payload
+                };
+
+                await fetch('http://localhost:3000/api/analyze', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(event)
+                });
+            } catch (e) {
+                console.error('Tracking error:', e);
+            }
+        }
+
+        // Emit checkout_started event
+        setTimeout(() => {
+            const cart = getCart();
+            sendEvent('cart_action', {
+                action: 'checkout_started',
+                item_count: cart.length,
+                total_value: getCartTotal()
+            });
+        }, 500);
+
+        // Track form field changes
+        const formFields = ['fullName', 'email', 'phone', 'country', 'address'];
+        formFields.forEach(fieldName => {
+            const input = document.getElementById(`field-${fieldName}`);
+            if (input) {
+                input.addEventListener('blur', (e) => {
+                    if (e.target.value.trim()) {
+                        sendEvent('form_field_change', {
+                            form_type: 'Shipping',
+                            field_name: fieldName,
+                            value: e.target.value.trim()
+                        });
+                    }
+                });
+            }
+        });
+
+        // Track shipping option selection
+        document.querySelectorAll('.shipping-option').forEach(radio => {
+            radio.addEventListener('change', (e) => {
+                if (e.target.checked) {
+                    sendEvent('shipping_option_selected', {
+                        option_name: e.target.dataset.name,
+                        cost: parseFloat(e.target.dataset.cost),
+                        delivery_time: e.target.dataset.time
+                    });
+                }
+            });
+        });
+
+        // Track delivery slot selection
+        const deliverySlot = document.getElementById('delivery-slot');
+        if (deliverySlot) {
+            deliverySlot.addEventListener('change', (e) => {
+                const selectedOption = e.target.options[e.target.selectedIndex];
+                sendEvent('delivery_slot_selected', {
+                    slot_name: e.target.value.charAt(0).toUpperCase() + e.target.value.slice(1),
+                    time_range: selectedOption.dataset.time
+                });
+            });
+        }
+
+        // Submit button logic
+        submitBtn.onclick = () => {
+            if (step === 1) {
+                // Move to Payment
+                step = 2;
+                paymentSection.classList.remove('opacity-50', 'pointer-events-none');
+                paymentSection.scrollIntoView({ behavior: 'smooth' });
+                submitBtn.innerText = "Place Order";
+                document.getElementById('step-2-indicator').classList.add('bg-purple-600');
+                document.getElementById('step-2-indicator').classList.remove('bg-gray-700');
+            } else {
+                // Submit
+                if (form.checkValidity()) {
+                    // Check AI Intervention
+                    const user = getUser();
+
+                    document.getElementById('main-content').classList.add('hidden');
+                    const successView = document.getElementById('success-view');
+                    successView.classList.remove('hidden');
+
+                    // Trigger Confetti
+                    const canvas = document.getElementById('confetti-canvas');
+                    const myConfetti = confetti.create(canvas, { resize: true });
+
+                    if (user.hasIntervention) {
+                        // Massive Celebration for AI Win
+                        document.getElementById('ai-success-msg').classList.remove('hidden');
+                        myConfetti({
+                            particleCount: 150,
+                            spread: 100,
+                            origin: { y: 0.6 },
+                            colors: ['#a855f7', '#ec4899', '#ffffff'] // Brand colors
+                        });
+                    } else {
+                        // Standard Celebration
+                        myConfetti({
+                            particleCount: 50,
+                            spread: 60,
+                            origin: { y: 0.6 }
+                        });
+                    }
+
+                    clearCart();
+                } else {
+                    form.reportValidity();
+                }
+            }
+        };
+
+        // Init
+        renderCart();
+    </script>
+</body>
+
+</html>

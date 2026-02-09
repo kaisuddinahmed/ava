@@ -1,0 +1,86 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer utilities {
+    .animate-bounce-subtle {
+        animation: bounce-subtle 2s infinite;
+    }
+
+    @keyframes bounce-subtle {
+
+        0%,
+        100% {
+            transform: translateY(-5%);
+            animation-timing-function: cubic-bezier(0.8, 0, 1, 1);
+        }
+
+        50% {
+            transform: translateY(0);
+            animation-timing-function: cubic-bezier(0, 0, 0.2, 1);
+        }
+    }
+
+    .animate-fade-in-up {
+        animation: fade-in-up 0.3s ease-out;
+    }
+
+    @keyframes fade-in-up {
+        from {
+            opacity: 0;
+            transform: translateY(10px);
+        }
+
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+
+    /* Light crossing animation for agent icon */
+    .animate-shine {
+        animation: shine 3s infinite;
+    }
+
+    @keyframes shine {
+        0% {
+            transform: translateX(-100%) rotate(45deg);
+        }
+        100% {
+            transform: translateX(200%) rotate(45deg);
+        }
+    }
+
+    /* VISUAL HIGHLIGHTS (Demo Suite) */
+    .risk-pulse {
+        position: fixed;
+        inset: 0;
+        border: 4px solid rgba(239, 68, 68, 0.5);
+        /* Red-500 */
+        pointer-events: none;
+        z-index: 9999;
+        animation: pulse-border 2s infinite;
+    }
+
+    .success-glow {
+        position: fixed;
+        inset: 0;
+        box-shadow: inset 0 0 50px rgba(34, 197, 94, 0.3);
+        /* Green-500 */
+        pointer-events: none;
+        z-index: 9999;
+        animation: fade-in 1s ease-out;
+    }
+
+    @keyframes pulse-border {
+
+        0%,
+        100% {
+            border-color: rgba(239, 68, 68, 0.5);
+        }
+
+        50% {
+            border-color: rgba(239, 68, 68, 0.1);
+        }
+    }
+}

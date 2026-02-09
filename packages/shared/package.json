@@ -1,0 +1,7 @@
+{
+    "name": "@virtual-salesman/shared",
+    "version": "1.0.0",
+    "type": "module",
+    "main": "types.ts",
+    "private": true
+}
