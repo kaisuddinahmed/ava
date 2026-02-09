@@ -1,0 +1,10 @@
+{
+  "name": "@ava/dashboard",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "echo 'Dashboard not yet built'",
+    "build": "echo 'Dashboard not yet built'"
+  }
+}

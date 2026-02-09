@@ -1,15 +1,16 @@
 {
-    "name": "@virtual-salesman/analyst",
+    "name": "@ava/analyst",
     "version": "1.0.0",
     "main": "index.ts",
     "scripts": {
-        "dev": "concurrently \"tsx watch index.ts\" \"npm run dev:ui\"",
-        "dev:ui": "cd ui && vite build --watch",
+        "dev": "concurrently \"node --import tsx index.ts\" \"npm run dev:ui\"",
+        "dev:ui": "vite build --watch -c ui/vite.config.ts",
         "build:ui": "cd ui && vite build",
+        "start": "node --import tsx index.ts",
         "test": "vitest"
     },
     "dependencies": {
-        "@virtual-salesman/shared": "*",
+        "@ava/shared": "*",
         "cors": "^2.8.5",
         "express": "^4.18.2",
         "lucide-react": "^0.314.0",

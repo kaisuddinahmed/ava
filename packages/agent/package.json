@@ -1,5 +1,5 @@
 {
-    "name": "@virtual-salesman/agent",
+    "name": "@ava/agent",
     "version": "1.0.0",
     "type": "module",
     "scripts": {
@@ -8,7 +8,7 @@
         "preview": "vite preview"
     },
     "dependencies": {
-        "@virtual-salesman/shared": "*",
+        "@ava/shared": "*",
         "preact": "^10.19.3",
         "uuid": "^9.0.1"
     },

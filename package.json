@@ -1,20 +1,37 @@
 {
-  "name": "virtual-salesman-monorepo",
+  "name": "ava",
   "private": true,
   "workspaces": [
-    "packages/*"
+    "packages/*",
+    "apps/*"
   ],
   "scripts": {
-    "dev:server": "npm run dev --workspace=packages/analyst",
-    "dev:widget": "npm run dev --workspace=packages/agent",
-    "start:demo": "npm run dev --workspace=packages/demo-view",
-    "dev:all": "concurrently \"npm run dev:server\" \"npm run dev:widget\" \"npm run start:demo\""
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "dev:server": "turbo run dev --filter=@ava/server",
+    "dev:dashboard": "turbo run dev --filter=@ava/dashboard",
+    "dev:widget": "turbo run dev --filter=@ava/widget",
+    "dev:demo": "turbo run dev --filter=@ava/demo",
+    "db:push": "turbo run db:push --filter=@ava/db",
+    "db:seed": "tsx scripts/seed-friction-catalog.ts && tsx scripts/seed-mswim-defaults.ts",
+
+    "dev:server:legacy": "npm run dev --workspace=packages/analyst",
+    "dev:widget:legacy": "npm run dev --workspace=packages/agent",
+    "start:demo:legacy": "npm run dev --workspace=packages/demo-view",
+    "dev:all:legacy": "concurrently -n \"Analyst,AVA,Demo\" -c \"blue,magenta,green\" \"npm run dev:server:legacy\" \"npm run dev:widget:legacy\" \"npm run start:demo:legacy\""
   },
   "devDependencies": {
     "@rollup/rollup-darwin-arm64": "^4.57.1",
-    "concurrently": "^9.2.1"
+    "concurrently": "^9.2.1",
+    "shell-quote": "^1.8.3",
+    "turbo": "^2.3.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0",
+    "yargs": "^18.0.0"
   },
   "dependencies": {
+    "array-flatten": "^3.0.0",
+    "dotenv": "^17.2.3",
     "express": "^5.2.1"
   }
 }

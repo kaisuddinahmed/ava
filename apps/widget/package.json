@@ -1,0 +1,10 @@
+{
+  "name": "@ava/widget",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "echo 'Widget not yet built'",
+    "build": "echo 'Widget not yet built'"
+  }
+}

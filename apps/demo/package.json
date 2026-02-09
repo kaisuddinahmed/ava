@@ -1,0 +1,10 @@
+{
+  "name": "@ava/demo",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "echo 'Demo not yet built'",
+    "build": "echo 'Demo not yet built'"
+  }
+}

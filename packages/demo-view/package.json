@@ -1,5 +1,5 @@
 {
-    "name": "@virtual-salesman/demo-view",
+    "name": "@ava/demo-view",
     "version": "1.0.0",
     "scripts": {
         "dev": "vite --host 0.0.0.0 --port 4000"

@@ -1,0 +1,39 @@
+import type { Request, Response } from "express";
+import { SessionRepo } from "@ava/db";
+
+export async function listSessions(req: Request, res: Response) {
+  try {
+    const siteUrl = req.query.siteUrl as string | undefined;
+    const sessions = siteUrl
+      ? await SessionRepo.listActiveSessions(siteUrl)
+      : await SessionRepo.getRecentSessions(20);
+    res.json({ sessions });
+  } catch (error) {
+    console.error("[API] List sessions error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+}
+
+export async function getSession(req: Request, res: Response) {
+  try {
+    const session = await SessionRepo.getSessionFull(req.params.id);
+    if (!session) {
+      res.status(404).json({ error: "Session not found" });
+      return;
+    }
+    res.json({ session });
+  } catch (error) {
+    console.error("[API] Get session error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+}
+
+export async function endSession(req: Request, res: Response) {
+  try {
+    await SessionRepo.endSession(req.params.id);
+    res.json({ ok: true });
+  } catch (error) {
+    console.error("[API] End session error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+}

@@ -1,0 +1,180 @@
+// ============================================================================
+// AVA — Prisma Schema
+// SQLite (dev) / PostgreSQL (prod)
+// ============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Session — one visitor session on the store
+// ---------------------------------------------------------------------------
+model Session {
+  id              String   @id @default(uuid())
+  visitorId       String?
+  siteUrl         String
+  startedAt       DateTime @default(now())
+  lastActivityAt  DateTime @default(now())
+  deviceType      String   // mobile | tablet | desktop
+  referrerType    String   // direct | organic | paid | social | email
+  isLoggedIn      Boolean  @default(false)
+  isRepeatVisitor Boolean  @default(false)
+  cartValue       Float    @default(0)
+  cartItemCount   Int      @default(0)
+  status          String   @default("active") // active | idle | ended
+
+  // MSWIM session-level tracking
+  totalInterventionsFired Int     @default(0)
+  totalDismissals         Int     @default(0)
+  totalConversions        Int     @default(0)
+  suppressNonPassive      Boolean @default(false)
+
+  events        TrackEvent[]
+  evaluations   Evaluation[]
+  interventions Intervention[]
+}
+
+// ---------------------------------------------------------------------------
+// TrackEvent — individual behavioral event from the widget
+// ---------------------------------------------------------------------------
+model TrackEvent {
+  id        String   @id @default(uuid())
+  sessionId String
+  session   Session  @relation(fields: [sessionId], references: [id])
+  timestamp DateTime @default(now())
+  category  String   // navigation | search | product | cart | checkout
+  eventType String   // click | scroll | hover | form_input | page_view
+  frictionId String? // F001–F325 if detected client-side
+  pageType  String   // landing | category | pdp | cart | checkout | other
+  pageUrl   String
+  rawSignals String  // JSON blob
+  metadata  String?
+
+  @@index([sessionId, timestamp])
+  @@index([frictionId])
+}
+
+// ---------------------------------------------------------------------------
+// Evaluation — LLM analysis result with MSWIM scores
+// ---------------------------------------------------------------------------
+model Evaluation {
+  id            String   @id @default(uuid())
+  sessionId     String
+  session       Session  @relation(fields: [sessionId], references: [id])
+  timestamp     DateTime @default(now())
+  eventBatchIds String   // JSON array of TrackEvent IDs
+
+  // LLM output
+  narrative      String // Prose reasoning (EVALUATE tab)
+  frictionsFound String // JSON array of friction_ids
+
+  // MSWIM 5 signals (0–100)
+  intentScore      Float
+  frictionScore    Float
+  clarityScore     Float
+  receptivityScore Float
+  valueScore       Float
+
+  // MSWIM composite + decision
+  compositeScore   Float  // Weighted sum
+  weightsUsed      String // JSON: weight profile applied
+  tier             String // MONITOR | PASSIVE | NUDGE | ACTIVE | ESCALATE
+  decision         String // fire | suppress | queue
+  gateOverride     String? // Which gate triggered, null if none
+  interventionType String? // passive | nudge | active | escalate
+  reasoning        String // Why
+
+  intervention Intervention?
+
+  @@index([sessionId, timestamp])
+  @@index([tier])
+}
+
+// ---------------------------------------------------------------------------
+// Intervention — action sent to the widget
+// ---------------------------------------------------------------------------
+model Intervention {
+  id           String     @id @default(uuid())
+  sessionId    String
+  session      Session    @relation(fields: [sessionId], references: [id])
+  evaluationId String     @unique
+  evaluation   Evaluation @relation(fields: [evaluationId], references: [id])
+  timestamp    DateTime   @default(now())
+
+  type       String // passive | nudge | active | escalate
+  actionCode String
+  frictionId String
+  payload    String // JSON sent to widget
+
+  // Outcome tracking (feeds MSWIM tuning)
+  status           String    @default("sent") // sent | delivered | dismissed | converted | ignored
+  deliveredAt      DateTime?
+  dismissedAt      DateTime?
+  convertedAt      DateTime?
+  ignoredAt        DateTime?
+  conversionAction String?
+
+  // MSWIM snapshot at fire time (for A/B analysis)
+  mswimScoreAtFire Float
+  tierAtFire       String
+
+  @@index([sessionId, timestamp])
+  @@index([status])
+  @@index([type, status])
+}
+
+// ---------------------------------------------------------------------------
+// ScoringConfig — configurable MSWIM weight profiles
+// ---------------------------------------------------------------------------
+model ScoringConfig {
+  id       String  @id @default(uuid())
+  name     String  // "default", "aggressive", "conservative", "site_xyz"
+  siteUrl  String? // null = global default, or site-specific override
+  isActive Boolean @default(false)
+
+  // Signal weights (must sum to 1.0)
+  weightIntent      Float @default(0.25)
+  weightFriction    Float @default(0.25)
+  weightClarity     Float @default(0.15)
+  weightReceptivity Float @default(0.20)
+  weightValue       Float @default(0.15)
+
+  // Tier thresholds
+  thresholdMonitor Float @default(29)
+  thresholdPassive Float @default(49)
+  thresholdNudge   Float @default(64)
+  thresholdActive  Float @default(79)
+
+  // Gate config
+  minSessionAgeSec        Int @default(30)
+  maxActivePerSession     Int @default(2)
+  maxNudgePerSession      Int @default(3)
+  maxNonPassivePerSession Int @default(6)
+  cooldownAfterActiveSec  Int @default(120)
+  cooldownAfterNudgeSec   Int @default(60)
+  cooldownAfterDismissSec Int @default(300)
+  dismissalsToSuppress    Int @default(3)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([siteUrl, isActive])
+}
+
+// ---------------------------------------------------------------------------
+// SiteConfig — per-site tracking & platform configuration
+// ---------------------------------------------------------------------------
+model SiteConfig {
+  id             String   @id @default(uuid())
+  siteUrl        String   @unique
+  platform       String   // shopify | woocommerce | magento | custom
+  trackingConfig String   // JSON: auto-detected selectors
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
