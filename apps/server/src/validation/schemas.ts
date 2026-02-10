@@ -134,6 +134,37 @@ export const ScoringConfigCreateSchema = z.object({
 export const ScoringConfigUpdateSchema = ScoringConfigCreateSchema.partial();
 
 // ============================================================================
+// API: ONBOARDING + INTEGRATION
+// ============================================================================
+
+export const OnboardingStartSchema = z
+  .object({
+    siteId: z.string().optional(),
+    siteUrl: z.string().min(1).optional(),
+    html: z.string().optional(),
+    forceReanalyze: z.boolean().optional().default(false),
+    platform: z
+      .enum(["shopify", "woocommerce", "magento", "custom"])
+      .optional()
+      .default("custom"),
+    trackingConfig: z.record(z.unknown()).optional(),
+  })
+  .refine((data) => Boolean(data.siteId || data.siteUrl), {
+    message: "Either siteId or siteUrl is required",
+    path: ["siteId"],
+  });
+
+export const OnboardingResultsQuerySchema = z.object({
+  limit: z.coerce.number().int().positive().max(500).optional().default(100),
+});
+
+export const IntegrationActivateSchema = z.object({
+  mode: z.enum(["auto", "active", "limited_active"]).optional().default("auto"),
+  criticalJourneysPassed: z.boolean().optional().default(false),
+  notes: z.string().max(2000).optional(),
+});
+
+// ============================================================================
 // UTILITY
 // ============================================================================
 

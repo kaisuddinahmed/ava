@@ -14,3 +14,7 @@ export * as EvaluationRepo from "./repositories/evaluation.repo.js";
 export * as InterventionRepo from "./repositories/intervention.repo.js";
 export * as ScoringConfigRepo from "./repositories/scoring-config.repo.js";
 export * as SiteConfigRepo from "./repositories/site-config.repo.js";
+export * as AnalyzerRunRepo from "./repositories/analyzer-run.repo.js";
+export * as BehaviorMappingRepo from "./repositories/behavior-mapping.repo.js";
+export * as FrictionMappingRepo from "./repositories/friction-mapping.repo.js";
+export * as IntegrationStatusRepo from "./repositories/integration-status.repo.js";

@@ -52,6 +52,8 @@ export async function updateSiteConfig(
   data: Partial<{
     platform: string;
     trackingConfig: string;
+    integrationStatus: string;
+    activeAnalyzerRunId: string | null;
   }>,
 ) {
   return prisma.siteConfig.update({ where: { id }, data });
@@ -60,6 +62,32 @@ export async function updateSiteConfig(
 /** Delete a site config. */
 export async function deleteSiteConfig(id: string) {
   return prisma.siteConfig.delete({ where: { id } });
+}
+
+/** Update site integration status and optionally the active analyzer run. */
+export async function setIntegrationStatus(
+  id: string,
+  integrationStatus: string,
+  activeAnalyzerRunId?: string | null,
+) {
+  return prisma.siteConfig.update({
+    where: { id },
+    data: {
+      integrationStatus,
+      ...(activeAnalyzerRunId !== undefined ? { activeAnalyzerRunId } : {}),
+    },
+  });
+}
+
+/** Set or clear active analyzer run pointer for a site. */
+export async function setActiveAnalyzerRun(
+  id: string,
+  activeAnalyzerRunId: string | null,
+) {
+  return prisma.siteConfig.update({
+    where: { id },
+    data: { activeAnalyzerRunId },
+  });
 }
 
 /** Get tracking config (parsed JSON) for a site URL. */

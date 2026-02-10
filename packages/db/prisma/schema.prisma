@@ -171,10 +171,115 @@ model ScoringConfig {
 // SiteConfig — per-site tracking & platform configuration
 // ---------------------------------------------------------------------------
 model SiteConfig {
+  id                  String                   @id @default(uuid())
+  siteUrl             String                   @unique
+  platform            String                   // shopify | woocommerce | magento | custom
+  trackingConfig      String                   // JSON: auto-detected selectors
+  integrationStatus   String                   @default("pending") // pending | analyzing | mapped | verified | limited_active | active | failed
+  activeAnalyzerRunId String?
+  activeAnalyzerRun   AnalyzerRun?             @relation("ActiveAnalyzerRun", fields: [activeAnalyzerRunId], references: [id])
+  analyzerRuns        AnalyzerRun[]            @relation("SiteAnalyzerRuns")
+  behaviorMappings    BehaviorPatternMapping[]
+  frictionMappings    FrictionMapping[]
+  integrationStatuses IntegrationStatus[]
+  createdAt           DateTime                 @default(now())
+  updatedAt           DateTime                 @updatedAt
+}
+
+// ---------------------------------------------------------------------------
+// AnalyzerRun — lifecycle + coverage metrics for onboarding analysis
+// ---------------------------------------------------------------------------
+model AnalyzerRun {
+  id               String   @id @default(uuid())
+  siteConfigId     String
+  siteConfig       SiteConfig @relation("SiteAnalyzerRuns", fields: [siteConfigId], references: [id])
+  startedAt        DateTime @default(now())
+  completedAt      DateTime?
+  status           String   @default("queued") // queued | running | completed | failed
+  phase            String   @default("detect_platform") // detect_platform | map_behaviors | map_frictions | verify | activate
+  behaviorCoverage Float    @default(0) // % of B001-B614 mapped
+  frictionCoverage Float    @default(0) // % of F001-F325 mapped
+  avgConfidence    Float    @default(0)
+  summary          String?  // JSON summary
+  errorMessage     String?
+
+  behaviorMappings    BehaviorPatternMapping[]
+  frictionMappings    FrictionMapping[]
+  activeForSites      SiteConfig[]        @relation("ActiveAnalyzerRun")
+  integrationStatuses IntegrationStatus[]
+
+  @@index([siteConfigId, startedAt])
+  @@index([status, phase])
+}
+
+// ---------------------------------------------------------------------------
+// BehaviorPatternMapping — B001-B614 mapped to site-level observables
+// ---------------------------------------------------------------------------
+model BehaviorPatternMapping {
   id             String   @id @default(uuid())
-  siteUrl        String   @unique
-  platform       String   // shopify | woocommerce | magento | custom
-  trackingConfig String   // JSON: auto-detected selectors
+  analyzerRunId  String
+  siteConfigId   String
+  analyzerRun    AnalyzerRun @relation(fields: [analyzerRunId], references: [id])
+  siteConfig     SiteConfig  @relation(fields: [siteConfigId], references: [id])
+  patternId      String   // B001-B614
+  patternName    String
+  mappedFunction String   // add_to_cart | open_cart | search_submit | checkout_submit | ...
+  eventType      String   // click | submit | hover | input | view | custom
+  selector       String?
+  confidence     Float    // 0.0–1.0
+  source         String   // dom_rule | platform_api | llm_inferred
+  evidence       String?  // JSON evidence
+  isVerified     Boolean  @default(false)
+  isActive       Boolean  @default(true)
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
+
+  @@index([siteConfigId, patternId])
+  @@index([analyzerRunId, confidence])
+  @@unique([siteConfigId, patternId, mappedFunction])
+}
+
+// ---------------------------------------------------------------------------
+// FrictionMapping — F001-F325 mapped to site-specific detector rules
+// ---------------------------------------------------------------------------
+model FrictionMapping {
+  id              String   @id @default(uuid())
+  analyzerRunId   String
+  siteConfigId    String
+  analyzerRun     AnalyzerRun @relation(fields: [analyzerRunId], references: [id])
+  siteConfig      SiteConfig  @relation(fields: [siteConfigId], references: [id])
+  frictionId      String   // F001-F325
+  detectorType    String   // rule | llm | hybrid
+  triggerEvent    String   // hover_pause | form_error | rage_click | ...
+  selector        String?
+  thresholdConfig String?  // JSON
+  confidence      Float    // 0.0–1.0
+  evidence        String?  // JSON evidence
+  isVerified      Boolean  @default(false)
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([siteConfigId, frictionId])
+  @@index([analyzerRunId, confidence])
+  @@unique([siteConfigId, frictionId, triggerEvent])
+}
+
+// ---------------------------------------------------------------------------
+// IntegrationStatus — progress log for onboarding + activation mode
+// ---------------------------------------------------------------------------
+model IntegrationStatus {
+  id            String   @id @default(uuid())
+  siteConfigId  String
+  analyzerRunId String?
+  siteConfig    SiteConfig   @relation(fields: [siteConfigId], references: [id])
+  analyzerRun   AnalyzerRun? @relation(fields: [analyzerRunId], references: [id])
+  status        String   // analyzing | mapped | verified | limited_active | active | failed
+  progress      Int      @default(0) // 0..100
+  details       String?  // JSON summary payload for UI/demo
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([siteConfigId, status])
+  @@index([analyzerRunId, status])
 }
