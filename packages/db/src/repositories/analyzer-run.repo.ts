@@ -31,18 +31,21 @@ export type UpdateAnalyzerRunInput = Partial<{
 // ---------------------------------------------------------------------------
 
 export async function createAnalyzerRun(data: CreateAnalyzerRunInput) {
-  return prisma.analyzerRun.create({ data });
+  const db = prisma as any;
+  return db.analyzerRun.create({ data });
 }
 
 export async function getAnalyzerRun(id: string) {
-  return prisma.analyzerRun.findUnique({
+  const db = prisma as any;
+  return db.analyzerRun.findUnique({
     where: { id },
     include: { siteConfig: true },
   });
 }
 
 export async function updateAnalyzerRun(id: string, data: UpdateAnalyzerRunInput) {
-  return prisma.analyzerRun.update({
+  const db = prisma as any;
+  return db.analyzerRun.update({
     where: { id },
     data,
   });
@@ -53,7 +56,8 @@ export async function updateAnalyzerRun(id: string, data: UpdateAnalyzerRunInput
 // ---------------------------------------------------------------------------
 
 export async function setAnalyzerRunPhase(id: string, phase: string) {
-  return prisma.analyzerRun.update({
+  const db = prisma as any;
+  return db.analyzerRun.update({
     where: { id },
     data: { phase },
   });
@@ -69,7 +73,8 @@ export async function completeAnalyzerRun(
     summary: string;
   }>,
 ) {
-  return prisma.analyzerRun.update({
+  const db = prisma as any;
+  return db.analyzerRun.update({
     where: { id },
     data: {
       status: "completed",
@@ -90,7 +95,8 @@ export async function completeAnalyzerRun(
 }
 
 export async function failAnalyzerRun(id: string, errorMessage: string) {
-  return prisma.analyzerRun.update({
+  const db = prisma as any;
+  return db.analyzerRun.update({
     where: { id },
     data: {
       status: "failed",
@@ -105,7 +111,8 @@ export async function failAnalyzerRun(id: string, errorMessage: string) {
 // ---------------------------------------------------------------------------
 
 export async function listAnalyzerRunsBySite(siteConfigId: string, limit = 20) {
-  return prisma.analyzerRun.findMany({
+  const db = prisma as any;
+  return db.analyzerRun.findMany({
     where: { siteConfigId },
     orderBy: { startedAt: "desc" },
     take: limit,
@@ -113,7 +120,8 @@ export async function listAnalyzerRunsBySite(siteConfigId: string, limit = 20) {
 }
 
 export async function getLatestAnalyzerRunBySite(siteConfigId: string) {
-  return prisma.analyzerRun.findFirst({
+  const db = prisma as any;
+  return db.analyzerRun.findFirst({
     where: { siteConfigId },
     orderBy: { startedAt: "desc" },
   });
@@ -123,7 +131,8 @@ export async function getAnalyzerRunWithMappings(
   id: string,
   options?: { behaviorLimit?: number; frictionLimit?: number },
 ) {
-  return prisma.analyzerRun.findUnique({
+  const db = prisma as any;
+  return db.analyzerRun.findUnique({
     where: { id },
     include: {
       siteConfig: true,
@@ -138,4 +147,3 @@ export async function getAnalyzerRunWithMappings(
     },
   });
 }
-

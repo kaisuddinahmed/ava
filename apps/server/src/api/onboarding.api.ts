@@ -4,13 +4,12 @@ import {
   BehaviorMappingRepo,
   FrictionMappingRepo,
   IntegrationStatusRepo,
-  SiteConfigRepo,
 } from "@ava/db";
-import { analyzeSite, reanalyzeSite } from "../site-analyzer/analyzer.service.js";
 import {
   OnboardingResultsQuerySchema,
   OnboardingStartSchema,
 } from "../validation/schemas.js";
+import { startOnboardingRun } from "../onboarding/onboarding.service.js";
 
 const TOTAL_BEHAVIOR_PATTERNS = 614;
 const TOTAL_FRICTION_SCENARIOS = 325;
@@ -30,63 +29,13 @@ export async function startOnboarding(req: Request, res: Response) {
       return;
     }
 
-    const payload = parsed.data;
-    let siteConfig = payload.siteId
-      ? await SiteConfigRepo.getSiteConfig(payload.siteId)
-      : null;
-
-    if (!siteConfig && payload.siteUrl) {
-      if (payload.forceReanalyze && payload.html) {
-        await reanalyzeSite(payload.siteUrl, payload.html);
-      } else {
-        await analyzeSite(payload.siteUrl, payload.html);
-      }
-      siteConfig = await SiteConfigRepo.getSiteConfigByUrl(payload.siteUrl);
-    }
-
-    // Fallback path: explicit upsert if analyzer did not produce a config.
-    if (!siteConfig && payload.siteUrl) {
-      siteConfig = await SiteConfigRepo.upsertSiteConfig({
-        siteUrl: payload.siteUrl,
-        platform: payload.platform,
-        trackingConfig: JSON.stringify(payload.trackingConfig ?? {}),
-      });
-    }
-
-    if (!siteConfig) {
-      res.status(404).json({ error: "Site config not found" });
-      return;
-    }
-
-    const run = await AnalyzerRunRepo.createAnalyzerRun({
-      siteConfigId: siteConfig.id,
-      status: "running",
-      phase: "detect_platform",
-    });
-
-    await Promise.all([
-      SiteConfigRepo.setIntegrationStatus(siteConfig.id, "analyzing", run.id),
-      IntegrationStatusRepo.createIntegrationStatus({
-        siteConfigId: siteConfig.id,
-        analyzerRunId: run.id,
-        status: "analyzing",
-        progress: 10,
-        details: JSON.stringify({
-          message: "Onboarding run started",
-          startedAt: run.startedAt.toISOString(),
-        }),
-      }),
-    ]);
-
-    res.status(201).json({
-      runId: run.id,
-      siteId: siteConfig.id,
-      status: run.status,
-      phase: run.phase,
-    });
+    const result = await startOnboardingRun(parsed.data);
+    res.status(201).json(result);
   } catch (error) {
     console.error("[API] Start onboarding error:", error);
-    res.status(500).json({ error: "Internal server error" });
+    const message = error instanceof Error ? error.message : "Internal server error";
+    const statusCode = message === "Site config not found" ? 404 : 500;
+    res.status(statusCode).json({ error: message });
   }
 }
 
@@ -229,4 +178,3 @@ export async function getOnboardingResults(req: Request, res: Response) {
     res.status(500).json({ error: "Internal server error" });
   }
 }
-

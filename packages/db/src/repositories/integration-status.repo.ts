@@ -23,18 +23,21 @@ export type UpdateIntegrationStatusInput = Partial<{
 // ---------------------------------------------------------------------------
 
 export async function createIntegrationStatus(data: CreateIntegrationStatusInput) {
-  return prisma.integrationStatus.create({ data });
+  const db = prisma as any;
+  return db.integrationStatus.create({ data });
 }
 
 export async function getIntegrationStatus(id: string) {
-  return prisma.integrationStatus.findUnique({ where: { id } });
+  const db = prisma as any;
+  return db.integrationStatus.findUnique({ where: { id } });
 }
 
 export async function updateIntegrationStatus(
   id: string,
   data: UpdateIntegrationStatusInput,
 ) {
-  return prisma.integrationStatus.update({
+  const db = prisma as any;
+  return db.integrationStatus.update({
     where: { id },
     data,
   });
@@ -48,7 +51,8 @@ export async function listIntegrationStatusesBySite(
   siteConfigId: string,
   limit = 50,
 ) {
-  return prisma.integrationStatus.findMany({
+  const db = prisma as any;
+  return db.integrationStatus.findMany({
     where: { siteConfigId },
     orderBy: { createdAt: "desc" },
     take: limit,
@@ -56,16 +60,17 @@ export async function listIntegrationStatusesBySite(
 }
 
 export async function getLatestIntegrationStatusBySite(siteConfigId: string) {
-  return prisma.integrationStatus.findFirst({
+  const db = prisma as any;
+  return db.integrationStatus.findFirst({
     where: { siteConfigId },
     orderBy: { createdAt: "desc" },
   });
 }
 
 export async function getLatestIntegrationStatusByRun(analyzerRunId: string) {
-  return prisma.integrationStatus.findFirst({
+  const db = prisma as any;
+  return db.integrationStatus.findFirst({
     where: { analyzerRunId },
     orderBy: { createdAt: "desc" },
   });
 }
-

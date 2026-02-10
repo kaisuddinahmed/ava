@@ -56,7 +56,7 @@ export async function updateSiteConfig(
     activeAnalyzerRunId: string | null;
   }>,
 ) {
-  return prisma.siteConfig.update({ where: { id }, data });
+  return prisma.siteConfig.update({ where: { id }, data: data as any });
 }
 
 /** Delete a site config. */
@@ -75,7 +75,7 @@ export async function setIntegrationStatus(
     data: {
       integrationStatus,
       ...(activeAnalyzerRunId !== undefined ? { activeAnalyzerRunId } : {}),
-    },
+    } as any,
   });
 }
 
@@ -86,7 +86,7 @@ export async function setActiveAnalyzerRun(
 ) {
   return prisma.siteConfig.update({
     where: { id },
-    data: { activeAnalyzerRunId },
+    data: { activeAnalyzerRunId } as any,
   });
 }
 
