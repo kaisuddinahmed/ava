@@ -1,5 +1,5 @@
 # AVA — AI Virtual Shopping Assistant
-## Project Structure & Build Plan for Claude Code
+## Project Structure & Build Plan
 ### Scoring Engine: MSWIM (Multi-Signal Weighted Intervention Model)
 
 ---
@@ -52,6 +52,23 @@
       │  tab         │  │  AVA Agent   │  │              │
       └──────────────┘  └──────────────┘  └──────────────┘
 ```
+
+### Plug & Play Onboarding Layer (Pre-runtime)
+
+Before TRACK starts on a new ecommerce site, AVA runs a one-time onboarding flow:
+
+1. Analyze site structure and platform (Shopify/WooCommerce/Magento/custom)
+2. Build a site-function graph (add-to-cart, search, filters, checkout, payment)
+3. Map **614 behavior patterns** (B001-B614) to site-specific selectors/events
+4. Map **325 friction scenarios** (F001-F325) to site-specific detector rules
+5. Verify mapping coverage + confidence + dry-run replay
+6. Activate integration for live TRACK -> EVALUATE -> INTERVENE
+
+Outputs persisted per site:
+- BehaviorPatternMapping coverage (how much of B001-B614 is mapped/verified)
+- FrictionMapping coverage (how much of F001-F325 is mapped/verified)
+- IntegrationStatus history (analyzing -> mapped -> verified -> limited_active/active/failed)
+- SiteConfig runtime selectors/config and active analyzer run
 
 ---
 
@@ -225,8 +242,9 @@ To fine-tune:
 
 | Layer | Tech | Why |
 |-------|------|-----|
+| **ONBOARDING (Analyze + Integrate)** | Node.js + site analyzer + rule engine + Groq assist | Maps 614 behavior patterns + 325 friction scenarios to site functions/selectors before go-live. |
 | **TRACK** | Vanilla JS snippet → WebSocket → Node.js server | Zero host dependencies. MutationObserver + event listeners. Real-time streaming. |
-| **EVALUATE** | Node.js + Anthropic Claude API + **MSWIM engine** | LLM reasons about friction, outputs 5 signal scores. MSWIM applies configurable weights → tier. |
+| **EVALUATE** | Node.js + Groq API (Llama 3.3 70B) + **MSWIM engine** | LLM reasons about friction, outputs 5 signal scores. MSWIM applies configurable weights → tier. |
 | **INTERVENE** | Node.js → WebSocket broadcast to widget | Structured JSON commands. Tier from MSWIM score. |
 | **Analyst Dashboard** | React + Vite (port 3000) | 3-tab view. MSWIM breakdown visualized in EVALUATE tab. |
 | **Agent Widget (AVA)** | Vanilla JS + Shadow DOM | Zero framework dependency. Injects into any website. |
@@ -259,9 +277,11 @@ ava/
 │   │       │   ├── intervention.ts      # InterventionCommand, PayloadTypes
 │   │       │   ├── session.ts           # SessionState, UserContext
 │   │       │   ├── widget.ts            # WidgetMessage, ProductCard, ComparisonCard
+│   │       │   ├── onboarding.ts        # AnalyzerRun, BehaviorPatternMapping, FrictionMapping, IntegrationStatus
 │   │       │   └── mswim.ts             # ★ MSWIMSignals, MSWIMConfig, MSWIMResult,
 │   │       │                            #   SignalWeights, ScoreTier, GateOverride
 │   │       ├── constants/
+│   │       │   ├── behavior-pattern-catalog.ts # B001–B614 behavior patterns
 │   │       │   ├── friction-catalog.ts  # F001–F325 friction scenarios
 │   │       │   ├── severity-scores.ts   # Severity per friction_id
 │   │       │   ├── intervention-types.ts# MONITOR/PASSIVE/NUDGE/ACTIVE/ESCALATE
@@ -274,7 +294,7 @@ ava/
 │       ├── package.json
 │       ├── tsconfig.json
 │       ├── prisma/
-│       │   ├── schema.prisma            # ★ Includes ScoringConfig table
+│       │   ├── schema.prisma            # ★ Includes ScoringConfig + onboarding mapping tables
 │       │   └── migrations/
 │       └── src/
 │           ├── index.ts
@@ -284,7 +304,11 @@ ava/
 │               ├── event.repo.ts
 │               ├── evaluation.repo.ts
 │               ├── intervention.repo.ts
-│               └── scoring-config.repo.ts # ★ CRUD for MSWIM weight profiles
+│               ├── scoring-config.repo.ts   # ★ CRUD for MSWIM weight profiles
+│               ├── analyzer-run.repo.ts
+│               ├── behavior-mapping.repo.ts
+│               ├── friction-mapping.repo.ts
+│               └── integration-status.repo.ts
 │
 ├── apps/
 │   ├── server/
@@ -337,6 +361,15 @@ ava/
 │   │       │   ├── channel-manager.ts
 │   │       │   └── broadcast.service.ts
 │   │       │
+│   │       ├── onboarding/             # ★ Pre-runtime analyzer + integration lifecycle
+│   │       │   ├── onboarding.service.ts
+│   │       │   ├── analyzer-runner.ts
+│   │       │   ├── behavior-mapper.ts
+│   │       │   ├── friction-mapper.ts
+│   │       │   ├── integration-verifier.ts
+│   │       │   ├── activation.service.ts
+│   │       │   └── progress-broadcaster.ts
+│   │       │
 │   │       ├── site-analyzer/
 │   │       │   ├── analyzer.service.ts
 │   │       │   ├── hook-generator.ts
@@ -353,6 +386,8 @@ ava/
 │   │           ├── events.api.ts
 │   │           ├── config.api.ts
 │   │           ├── analytics.api.ts
+│   │           ├── onboarding.api.ts     # start/status/results for analyzer runs
+│   │           ├── integration.api.ts    # verify/activate integration per site
 │   │           └── scoring-config.api.ts # ★ CRUD for MSWIM profiles
 │   │
 │   ├── dashboard/
@@ -444,7 +479,11 @@ ava/
 │           │   ├── MockStore.tsx
 │           │   ├── DashboardEmbed.tsx
 │           │   ├── SplitView.tsx
-│           │   └── ScenarioRunner.tsx
+│           │   ├── ScenarioRunner.tsx
+│           │   ├── IntegrationWizard.tsx
+│           │   ├── AnalyzerProgress.tsx
+│           │   ├── MappingCoverage.tsx
+│           │   └── GoLivePanel.tsx
 │           └── mock-data/
 │               ├── products.ts
 │               └── scenarios.ts
@@ -453,6 +492,7 @@ ava/
 │   ├── setup.sh
 │   ├── dev.sh
 │   ├── generate-tracker.sh
+│   ├── seed-behavior-pattern-catalog.ts # ★ Seed B001–B614 catalog
 │   ├── seed-friction-catalog.ts
 │   └── seed-mswim-defaults.ts       # ★ Seed default weight profile
 │
@@ -461,6 +501,8 @@ ava/
     ├── MSWIM.md                      # ★ Full MSWIM algorithm docs
     ├── TRACK-EVENTS.md
     ├── EVALUATE-PROMPTS.md
+    ├── ONBOARDING-INTEGRATION.md     # ★ Analyzer run lifecycle
+    ├── BEHAVIOR-CATALOG.md           # ★ B001–B614 catalog docs
     ├── FRICTION-CATALOG.md
     ├── INTERVENTION-ACTIONS.md
     └── EMBED-GUIDE.md
@@ -622,12 +664,105 @@ model ScoringConfig {
 }
 
 model SiteConfig {
-  id             String   @id @default(uuid())
-  siteUrl        String   @unique
-  platform       String   // shopify | woocommerce | magento | custom
-  trackingConfig String   // JSON: auto-detected selectors
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id                   String   @id @default(uuid())
+  siteUrl              String   @unique
+  platform             String   // shopify | woocommerce | magento | custom
+  trackingConfig       String   // JSON: auto-detected selectors
+  integrationStatus    String   @default("pending") // pending | analyzing | mapped | verified | limited_active | active | failed
+  activeAnalyzerRunId  String?
+  activeAnalyzerRun    AnalyzerRun? @relation("ActiveAnalyzerRun", fields: [activeAnalyzerRunId], references: [id])
+  analyzerRuns         AnalyzerRun[] @relation("SiteAnalyzerRuns")
+  behaviorMappings     BehaviorPatternMapping[]
+  frictionMappings     FrictionMapping[]
+  integrationStatuses  IntegrationStatus[]
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+}
+
+model AnalyzerRun {
+  id                String   @id @default(uuid())
+  siteConfigId      String
+  siteConfig        SiteConfig @relation("SiteAnalyzerRuns", fields: [siteConfigId], references: [id])
+  startedAt         DateTime @default(now())
+  completedAt       DateTime?
+  status            String   @default("queued") // queued | running | completed | failed
+  phase             String   @default("detect_platform") // detect_platform | map_behaviors | map_frictions | verify | activate
+  behaviorCoverage  Float    @default(0) // % of B001–B614 mapped
+  frictionCoverage  Float    @default(0) // % of F001–F325 mapped
+  avgConfidence     Float    @default(0)
+  summary           String?  // JSON summary
+  errorMessage      String?
+
+  behaviorMappings    BehaviorPatternMapping[]
+  frictionMappings    FrictionMapping[]
+  activeForSites      SiteConfig[] @relation("ActiveAnalyzerRun")
+  integrationStatuses IntegrationStatus[]
+
+  @@index([siteConfigId, startedAt])
+  @@index([status, phase])
+}
+
+model BehaviorPatternMapping {
+  id              String   @id @default(uuid())
+  analyzerRunId   String
+  siteConfigId    String
+  analyzerRun     AnalyzerRun @relation(fields: [analyzerRunId], references: [id])
+  siteConfig      SiteConfig  @relation(fields: [siteConfigId], references: [id])
+  patternId       String   // B001–B614
+  patternName     String
+  mappedFunction  String   // add_to_cart | open_cart | search_submit | checkout_submit | ...
+  eventType       String   // click | submit | hover | input | view | custom
+  selector        String?
+  confidence      Float    // 0.0–1.0
+  source          String   // dom_rule | platform_api | llm_inferred
+  evidence        String?  // JSON evidence
+  isVerified      Boolean  @default(false)
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([siteConfigId, patternId])
+  @@index([analyzerRunId, confidence])
+  @@unique([siteConfigId, patternId, mappedFunction])
+}
+
+model FrictionMapping {
+  id               String   @id @default(uuid())
+  analyzerRunId    String
+  siteConfigId     String
+  analyzerRun      AnalyzerRun @relation(fields: [analyzerRunId], references: [id])
+  siteConfig       SiteConfig  @relation(fields: [siteConfigId], references: [id])
+  frictionId       String   // F001–F325
+  detectorType     String   // rule | llm | hybrid
+  triggerEvent     String   // hover_pause | form_error | rage_click | ...
+  selector         String?
+  thresholdConfig  String?  // JSON
+  confidence       Float    // 0.0–1.0
+  evidence         String?  // JSON evidence
+  isVerified       Boolean  @default(false)
+  isActive         Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([siteConfigId, frictionId])
+  @@index([analyzerRunId, confidence])
+  @@unique([siteConfigId, frictionId, triggerEvent])
+}
+
+model IntegrationStatus {
+  id            String   @id @default(uuid())
+  siteConfigId  String
+  analyzerRunId String?
+  siteConfig    SiteConfig  @relation(fields: [siteConfigId], references: [id])
+  analyzerRun   AnalyzerRun? @relation(fields: [analyzerRunId], references: [id])
+  status        String   // analyzing | mapped | verified | limited_active | active | failed
+  progress      Int      @default(0) // 0..100
+  details       String?  // JSON summary payload for UI/demo
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([siteConfigId, status])
+  @@index([analyzerRunId, status])
 }
 ```
 
@@ -650,7 +785,7 @@ model SiteConfig {
     "dev:widget": "turbo run dev --filter=@ava/widget",
     "dev:demo": "turbo run dev --filter=@ava/demo",
     "db:push": "turbo run db:push --filter=@ava/db",
-    "db:seed": "tsx scripts/seed-friction-catalog.ts && tsx scripts/seed-mswim-defaults.ts",
+    "db:seed": "tsx scripts/seed-behavior-pattern-catalog.ts && tsx scripts/seed-friction-catalog.ts && tsx scripts/seed-mswim-defaults.ts",
     "setup": "bash scripts/setup.sh"
   },
   "devDependencies": {
@@ -676,7 +811,7 @@ model SiteConfig {
   "dependencies": {
     "@ava/shared": "workspace:*",
     "@ava/db": "workspace:*",
-    "@anthropic-ai/sdk": "^0.39.0",
+    "groq-sdk": "^0.7.0",
     "express": "^4.21.0",
     "ws": "^8.18.0",
     "cors": "^2.8.5",
@@ -826,7 +961,7 @@ Event Buffer (5s / 10 events)
 Context Builder
     │ Assembles: session metadata + event history + previous evaluations
     ▼
-Anthropic Claude API
+Groq API (Llama 3.3 70B)
     │ Returns: narrative + 5 signals + friction_ids + recommendation
     ▼
 MSWIM Engine (server-side)
@@ -884,11 +1019,50 @@ Decision Engine
    → URL patterns + DOM signals → landing | category | pdp | cart | checkout
 ```
 
+## ONBOARDING ANALYZER: How AVA maps 614 behaviors + 325 frictions
+
+```
+1. ANALYZE SITE
+   → Detect platform, crawl templates, build DOM/function graph
+
+2. MAP BEHAVIOR PATTERNS (B001–B614)
+   → Link each behavior pattern to concrete site functions/selectors/events
+   → Store confidence + evidence per mapping
+
+3. MAP FRICTION SCENARIOS (F001–F325)
+   → Bind each friction to rule/LLM/hybrid detector triggers for this site
+   → Store selector + threshold config + confidence
+
+4. VERIFY (DRY RUN)
+   → Replay synthetic and recorded journeys
+   → Validate mapping coverage and false-positive rate
+
+5. ACTIVATE
+   → Mark site integration active (full or limited mode)
+   → Start live TRACK -> EVALUATE -> INTERVENE
+```
+
+### Go-Live Modes
+
+```
+Full activation (`active`) criteria:
+  - Behavior mapping coverage >= 85% (B001–B614)
+  - Friction mapping coverage >= 80% (F001–F325)
+  - Average mapping confidence >= 0.75
+  - Critical journey checks pass (ATC, cart, checkout, payment)
+
+If criteria are not met, allow revenue-protection activation (`limited_active`) with guardrails:
+  - TRACK + EVALUATE start immediately
+  - INTERVENE limited to low-risk scope (PASSIVE + NUDGE by default)
+  - Automated actions only from high-confidence mappings
+  - System continuously emits mapping-gap feedback until full thresholds are met
+```
+
 ---
 
-## CLAUDE CODE COMMANDS
+## TERMINAL COMMANDS
 
-Execute these in order in your terminal with Claude Code:
+Execute these in order in your terminal:
 
 ### Phase 1: Project Scaffolding
 ```
@@ -908,6 +1082,8 @@ Install all dependencies listed in the package.json files.
 ### Phase 2: Shared Types & Database
 ```
 In packages/shared, create all TypeScript types for:
+- BehaviorPattern (B001–B614), BehaviorPatternMapping, FrictionMapping,
+  AnalyzerRun, IntegrationStatus
 - TrackEvent (behavioral events with friction_id, category, rawSignals)
 - EvaluationResult with all 5 MSWIM signal scores (intent, friction, clarity,
   receptivity, value) plus compositeScore, tier, and weightsUsed
@@ -925,6 +1101,9 @@ In packages/shared, create all TypeScript types for:
   FORCE_ESCALATE_CHECKOUT_TIMEOUT | FORCE_ESCALATE_HELP_SEARCH
 - All other enums: FrictionCategory, InterventionType, InterventionStatus
 
+In packages/shared/src/constants/behavior-pattern-catalog.ts, define all
+614 behavior patterns (B001–B614) with category + description.
+
 In packages/shared/src/constants/mswim-defaults.ts, define the default weight profile
 and all gate rule constants.
 
@@ -934,12 +1113,34 @@ calculator: MSWIMSignals + SignalWeights → weighted sum (0–100).
 In packages/db, set up Prisma with the schema from this document. Tables: Session
 (with MSWIM session tracking), TrackEvent, Evaluation (5 signals + composite + tier
 + gateOverride), Intervention (outcome tracking + MSWIM snapshot), ScoringConfig
-(tunable weight profiles), SiteConfig.
+(tunable weight profiles), SiteConfig, AnalyzerRun, BehaviorPatternMapping,
+FrictionMapping, IntegrationStatus.
 
-Run initial migration. Seed friction catalog (F001–F325) and default MSWIM weight profile.
+Run initial migration. Seed behavior catalog (B001–B614), friction catalog
+(F001–F325), and default MSWIM weight profile.
 ```
 
-### Phase 3: TRACK Layer
+### Phase 3: Onboarding Analyzer (Analyze + Integrate)
+```
+Build the ONBOARDING layer in apps/server/src/onboarding/:
+- onboarding.service.ts orchestrates run lifecycle:
+  queued -> running -> mapped -> verified -> limited_active/active/failed
+- analyzer-runner.ts performs platform detection + site crawl
+- behavior-mapper.ts maps B001–B614 to selectors/events/functions
+- friction-mapper.ts maps F001–F325 to detector rules per site
+- integration-verifier.ts runs dry-run checks on critical journeys
+- activation.service.ts marks integration mode (limited_active/active) and stores runtime config
+- progress-broadcaster.ts pushes analyzer progress updates (dashboard/demo)
+
+Build API endpoints:
+- POST /api/onboarding/start
+- GET /api/onboarding/:runId/status
+- GET /api/onboarding/:runId/results
+- POST /api/integration/:siteId/verify
+- POST /api/integration/:siteId/activate
+```
+
+### Phase 4: TRACK Layer
 ```
 Build the TRACK layer in apps/server/src/track/:
 - WebSocket handler that receives raw behavioral events from the widget
@@ -958,12 +1159,12 @@ Build the client-side tracker in apps/widget/src/tracker/:
 - Use MutationObserver to detect dynamic DOM changes (SPAs)
 ```
 
-### Phase 4: EVALUATE Layer + MSWIM Engine
+### Phase 5: EVALUATE Layer + MSWIM Engine
 ```
 Build the EVALUATE layer in apps/server/src/evaluate/:
 
 1. LLM Analyst (analyst.ts):
-   - Calls Anthropic Claude API with full session context
+   - Calls Groq API (Llama 3.3 70B) with full session context
    - System prompt instructs LLM to output: narrative, detected friction_ids,
      and RAW SCORES for all 5 MSWIM signals (0–100)
    - Use the system prompt from this architecture doc verbatim
@@ -1008,7 +1209,7 @@ Build the EVALUATE layer in apps/server/src/evaluate/:
    - Stores Evaluation record with all 5 signals + composite + tier
 ```
 
-### Phase 5: INTERVENE Layer
+### Phase 6: INTERVENE Layer
 ```
 Build the INTERVENE layer in apps/server/src/intervene/:
 - Payload builder maps friction_id + MSWIM tier to structured command
@@ -1024,7 +1225,7 @@ Build broadcast layer in apps/server/src/broadcast/:
 - Demo receives: everything
 ```
 
-### Phase 6: Widget (AVA Agent)
+### Phase 7: Widget (AVA Agent)
 ```
 Build the AVA widget in apps/widget/:
 - Shadow DOM shell isolating styles from host page
@@ -1037,7 +1238,7 @@ Build the AVA widget in apps/widget/:
 - Must work on ANY website with zero framework dependencies
 ```
 
-### Phase 7: Dashboard
+### Phase 8: Dashboard
 ```
 Build the Analyst Dashboard in apps/dashboard/:
 - 3-tab layout: TRACK | EVALUATE | INTERVENE
@@ -1064,10 +1265,16 @@ Build the Analyst Dashboard in apps/dashboard/:
 - All data via WebSocket (real-time)
 ```
 
-### Phase 8: Demo View
+### Phase 9: Demo View (Sales + Technical Validation)
 ```
 Build Demo View in apps/demo/:
 - Side-by-side: mock store (left) + dashboard (right)
+- Integration wizard UI: Analyze -> Map Behaviors -> Map Frictions -> Verify -> Activate
+- Analyzer progress timeline: stage, coverage %, confidence, blockers
+- Mapping coverage panel:
+  - Behaviors mapped: X/614
+  - Frictions mapped: Y/325
+  - Critical journey status: pass/fail
 - Mock store: product grid, product pages, cart, checkout
 - AVA widget embedded in mock store
 - Scenario runner: buttons to simulate friction scenarios
@@ -1092,8 +1299,8 @@ WS_PORT=8081
 DATABASE_URL="file:./dev.db"
 
 # LLM
-ANTHROPIC_API_KEY=sk-ant-xxxxx
-ANTHROPIC_MODEL=claude-sonnet-4-20250514
+GROQ_API_KEY=gsk_xxxxx
+GROQ_MODEL=llama-3.3-70b-versatile
 
 # ★ MSWIM Defaults (overridden by ScoringConfig in DB)
 MSWIM_W_INTENT=0.25
@@ -1122,7 +1329,7 @@ AVA_DEV_SERVER_URL=ws://localhost:8081
 cd ava
 npm install
 npm run db:push          # Create SQLite tables
-npm run db:seed          # Seed friction catalog + MSWIM defaults
+npm run db:seed          # Seed behavior catalog + friction catalog + MSWIM defaults
 npm run dev              # Starts all apps via Turborepo
 
 # Or individually:
