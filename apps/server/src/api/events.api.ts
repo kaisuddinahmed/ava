@@ -1,15 +1,24 @@
 import type { Request, Response } from "express";
 import { EventRepo } from "@ava/db";
+import { EventsQuerySchema } from "../validation/schemas.js";
 
 export async function getEvents(req: Request, res: Response) {
   try {
+    const parsed = EventsQuerySchema.safeParse(req.query);
+    if (!parsed.success) {
+      res.status(400).json({
+        error: "Validation failed",
+        details: parsed.error.issues,
+      });
+      return;
+    }
+
     const { sessionId } = req.params;
-    const limit = req.query.limit ? Number(req.query.limit) : 100;
-    const since = req.query.since ? new Date(req.query.since as string) : undefined;
+    const { limit, since } = parsed.data;
 
     const events = await EventRepo.getEventsBySession(sessionId, {
       limit,
-      since,
+      since: since ? new Date(since) : undefined,
     });
     res.json({ events });
   } catch (error) {

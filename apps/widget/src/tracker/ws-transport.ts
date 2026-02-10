@@ -1,0 +1,85 @@
+type BridgeEventListener = (data: any) => void;
+
+export class FISMBridge {
+  private ws: WebSocket | null = null;
+  private url: string;
+  private sessionId: string;
+  private listeners: Map<string, Set<BridgeEventListener>> = new Map();
+  private reconnectAttempts = 0;
+  private maxReconnectAttempts = 5;
+  private reconnectDelay = 1000;
+  private messageQueue: any[] = [];
+
+  constructor(url: string, sessionId: string) {
+    this.url = url;
+    this.sessionId = sessionId;
+  }
+
+  connect(): void {
+    try {
+      this.ws = new WebSocket(`${this.url}?session=${this.sessionId}`);
+
+      this.ws.onopen = () => {
+        console.log("[AVA] Connected to server");
+        this.reconnectAttempts = 0;
+        // Flush queued messages
+        this.messageQueue.forEach((msg) => this.ws?.send(JSON.stringify(msg)));
+        this.messageQueue = [];
+        this.emit("connected", {});
+      };
+
+      this.ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          this.emit(data.type, data.payload);
+        } catch (e) {
+          console.error("[AVA] Failed to parse message:", e);
+        }
+      };
+
+      this.ws.onclose = () => {
+        console.log("[AVA] Disconnected");
+        this.emit("disconnected", {});
+        this.attemptReconnect();
+      };
+
+      this.ws.onerror = (error) => {
+        console.error("[AVA] WebSocket error:", error);
+      };
+    } catch (e) {
+      console.error("[AVA] Connection failed:", e);
+      this.attemptReconnect();
+    }
+  }
+
+  private attemptReconnect(): void {
+    if (this.reconnectAttempts >= this.maxReconnectAttempts) return;
+    this.reconnectAttempts++;
+    console.log(`[AVA] Reconnecting in ${this.reconnectDelay * this.reconnectAttempts}ms...`);
+    setTimeout(() => this.connect(), this.reconnectDelay * this.reconnectAttempts);
+  }
+
+  send(type: string, payload: any): void {
+    const msg = { type, payload, session_id: this.sessionId, timestamp: Date.now() };
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify(msg));
+    } else {
+      this.messageQueue.push(msg);
+    }
+  }
+
+  on(event: string, callback: BridgeEventListener): () => void {
+    if (!this.listeners.has(event)) this.listeners.set(event, new Set());
+    this.listeners.get(event)!.add(callback);
+    return () => this.listeners.get(event)?.delete(callback);
+  }
+
+  private emit(event: string, data: any): void {
+    this.listeners.get(event)?.forEach((cb) => cb(data));
+  }
+
+  disconnect(): void {
+    this.ws?.close();
+    this.listeners.clear();
+  }
+}

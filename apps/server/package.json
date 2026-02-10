@@ -11,7 +11,7 @@
   "dependencies": {
     "@ava/shared": "*",
     "@ava/db": "*",
-    "@anthropic-ai/sdk": "^0.39.0",
+    "groq-sdk": "^0.8.0",
     "express": "^4.21.0",
     "ws": "^8.18.0",
     "cors": "^2.8.5",

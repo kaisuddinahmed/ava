@@ -13,3 +13,4 @@ export * as EventRepo from "./repositories/event.repo.js";
 export * as EvaluationRepo from "./repositories/evaluation.repo.js";
 export * as InterventionRepo from "./repositories/intervention.repo.js";
 export * as ScoringConfigRepo from "./repositories/scoring-config.repo.js";
+export * as SiteConfigRepo from "./repositories/site-config.repo.js";

@@ -1,6 +1,10 @@
 import type { Request, Response } from "express";
 import { ScoringConfigRepo } from "@ava/db";
 import { invalidateConfigCache } from "../evaluate/mswim/config-loader.js";
+import {
+  ScoringConfigCreateSchema,
+  ScoringConfigUpdateSchema,
+} from "../validation/schemas.js";
 
 export async function listConfigs(_req: Request, res: Response) {
   try {
@@ -28,7 +32,15 @@ export async function getConfig(req: Request, res: Response) {
 
 export async function createConfig(req: Request, res: Response) {
   try {
-    const config = await ScoringConfigRepo.createScoringConfig(req.body);
+    const parsed = ScoringConfigCreateSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({
+        error: "Validation failed",
+        details: parsed.error.issues,
+      });
+      return;
+    }
+    const config = await ScoringConfigRepo.createScoringConfig(parsed.data);
     res.status(201).json({ config });
   } catch (error) {
     console.error("[API] Create scoring config error:", error);
@@ -38,7 +50,18 @@ export async function createConfig(req: Request, res: Response) {
 
 export async function updateConfig(req: Request, res: Response) {
   try {
-    const config = await ScoringConfigRepo.updateScoringConfig(req.params.id, req.body);
+    const parsed = ScoringConfigUpdateSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({
+        error: "Validation failed",
+        details: parsed.error.issues,
+      });
+      return;
+    }
+    const config = await ScoringConfigRepo.updateScoringConfig(
+      req.params.id,
+      parsed.data,
+    );
     invalidateConfigCache();
     res.json({ config });
   } catch (error) {

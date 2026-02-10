@@ -9,8 +9,12 @@
       "cache": false,
       "persistent": true
     },
-    "db:push": {
+    "db:generate": {
       "cache": false
+    },
+    "db:push": {
+      "cache": false,
+      "dependsOn": ["db:generate"]
     },
     "db:seed": {
       "cache": false,

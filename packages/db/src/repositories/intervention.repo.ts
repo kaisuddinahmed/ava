@@ -151,3 +151,13 @@ export async function getInterventionsByFriction(
     orderBy: { timestamp: "desc" },
   });
 }
+
+/**
+ * List all interventions with optional limit (for analytics).
+ */
+export async function listInterventions(options?: { limit?: number }) {
+  return prisma.intervention.findMany({
+    orderBy: { timestamp: "desc" },
+    take: options?.limit ?? 100,
+  });
+}

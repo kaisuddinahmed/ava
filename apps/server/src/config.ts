@@ -8,9 +8,9 @@ export const config = {
     url: process.env.DATABASE_URL ?? "file:./packages/db/prisma/dev.db",
   },
 
-  anthropic: {
-    apiKey: process.env.ANTHROPIC_API_KEY ?? "",
-    model: process.env.ANTHROPIC_MODEL ?? "claude-sonnet-4-20250514",
+  groq: {
+    apiKey: process.env.GROQ_API_KEY ?? "",
+    model: process.env.GROQ_MODEL ?? "llama-3.3-70b-versatile",
   },
 
   mswim: {

@@ -1,11 +1,11 @@
-import Anthropic from "@anthropic-ai/sdk";
+import Groq from "groq-sdk";
 import { config } from "../config.js";
 import { SYSTEM_PROMPT } from "./prompts/system-prompt.js";
 import { buildEvaluatePrompt } from "./prompts/evaluate-prompt.js";
 import type { EvaluationContext } from "./context-builder.js";
 
-const anthropic = new Anthropic({
-  apiKey: config.anthropic.apiKey,
+const groq = new Groq({
+  apiKey: config.groq.apiKey,
 });
 
 export interface LLMEvaluationOutput {
@@ -23,33 +23,38 @@ export interface LLMEvaluationOutput {
 }
 
 /**
- * Call the Anthropic Claude API to evaluate the session.
+ * Call the Groq API (Llama 3.3 70B) to evaluate the session.
  */
 export async function evaluateWithLLM(
   context: EvaluationContext
 ): Promise<LLMEvaluationOutput> {
   const userPrompt = buildEvaluatePrompt(context);
 
-  const response = await anthropic.messages.create({
-    model: config.anthropic.model,
+  const response = await groq.chat.completions.create({
+    model: config.groq.model,
     max_tokens: 1024,
-    system: SYSTEM_PROMPT,
     messages: [
+      {
+        role: "system",
+        content: SYSTEM_PROMPT,
+      },
       {
         role: "user",
         content: userPrompt,
       },
     ],
+    temperature: 0.3,
+    response_format: { type: "json_object" },
   });
 
   // Extract text from response
-  const textBlock = response.content.find((b) => b.type === "text");
-  if (!textBlock || textBlock.type !== "text") {
+  const text = response.choices?.[0]?.message?.content;
+  if (!text) {
     throw new Error("No text response from LLM");
   }
 
   // Parse the JSON response
-  const raw = textBlock.text.trim();
+  const raw = text.trim();
 
   // Try to extract JSON from markdown code blocks if present
   const jsonMatch = raw.match(/```(?:json)?\s*([\s\S]*?)```/);

@@ -82,6 +82,16 @@ export async function getEvaluationsBySite(siteUrl: string, limit = 50) {
 }
 
 /**
+ * List all evaluations with optional limit (for analytics).
+ */
+export async function listEvaluations(options?: { limit?: number }) {
+  return prisma.evaluation.findMany({
+    orderBy: { timestamp: "desc" },
+    take: options?.limit ?? 100,
+  });
+}
+
+/**
  * Get all evaluated event IDs for a session (to avoid re-evaluating).
  */
 export async function getEvaluatedEventIds(

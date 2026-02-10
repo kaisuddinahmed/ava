@@ -1,6 +1,7 @@
 import { WebSocketServer, type WebSocket } from "ws";
 import { handleTrackMessage } from "../track/track.handlers.js";
 import { registerClient, unregisterClient } from "./channel-manager.js";
+import { WsDashboardMessageSchema, validatePayload } from "../validation/schemas.js";
 
 /**
  * Create the main WebSocket server.
@@ -24,7 +25,6 @@ export function createWSServer(port: number): WebSocketServer {
       if (channel === "widget") {
         handleTrackMessage(ws, message);
       } else if (channel === "dashboard") {
-        // Dashboard sends control messages
         handleDashboardMessage(ws, message);
       }
     });
@@ -50,12 +50,20 @@ export function createWSServer(port: number): WebSocketServer {
   return wss;
 }
 
-function handleDashboardMessage(_ws: WebSocket, data: string) {
+function handleDashboardMessage(ws: WebSocket, data: string) {
   try {
-    const msg = JSON.parse(data);
+    const raw = JSON.parse(data);
+    const result = validatePayload(WsDashboardMessageSchema, raw);
+
+    if (!result.success) {
+      console.warn("[WS] Dashboard message validation failed:", result.error);
+      ws.send(JSON.stringify({ type: "validation_error", error: result.error }));
+      return;
+    }
+
     // Handle dashboard control messages (e.g., select session, tune weights)
-    console.log("[WS] Dashboard message:", msg.type);
+    console.log("[WS] Dashboard message:", result.data.type);
   } catch {
-    // ignore
+    // ignore malformed JSON
   }
 }
