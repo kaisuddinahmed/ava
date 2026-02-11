@@ -4,7 +4,11 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "echo 'Demo not yet built'",
-    "build": "echo 'Demo not yet built'"
+    "dev": "vite --host 0.0.0.0 --port 4002",
+    "build": "vite build",
+    "preview": "vite preview --host 0.0.0.0 --port 4102"
+  },
+  "devDependencies": {
+    "vite": "^5.4.1"
   }
 }
