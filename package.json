@@ -9,10 +9,11 @@
   "scripts": {
     "dev": "turbo run dev",
     "build": "turbo run build",
-    "dev:server": "turbo run dev --filter=@ava/server",
+    "dev:server": "npm run dev --workspace=@ava/server",
     "dev:dashboard": "turbo run dev --filter=@ava/dashboard",
     "dev:widget": "turbo run dev --filter=@ava/widget",
-    "dev:demo": "turbo run dev --filter=@ava/demo",
+    "dev:integration": "npm run dev --workspace=@ava/demo",
+    "dev:demo": "concurrently -k -n server,store,wizard -c blue,green,magenta \"npm run dev:server\" \"npm run dev --workspace=@ava/agent\" \"npm run dev:integration\"",
     "db:push": "prisma db push --schema packages/db/prisma/schema.prisma",
     "db:push:fast": "prisma db push --skip-generate --schema packages/db/prisma/schema.prisma",
     "db:generate": "prisma generate --schema packages/db/prisma/schema.prisma",

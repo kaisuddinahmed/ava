@@ -70,14 +70,19 @@ Signal calculators: `apps/server/src/evaluate/mswim/signals/*.signal.ts`.
 ## Commands
 
 ```
-npm run dev              # Start all apps (Turborepo)
-npm run dev:server       # Backend only (:8080 + WS :8081)
-npm run dev:dashboard    # Dashboard only (:3000)
-npm run dev:widget       # Widget dev (:5173)
-npm run dev:demo         # Demo view (:4000)
-npm run db:push          # Apply schema to SQLite
-npm run db:seed          # Seed behavior catalog + friction catalog + MSWIM defaults
-npm run build            # Production build all apps
+npm run dev                                # Start all app dev scripts (Turborepo)
+npm run dev:server                         # Backend only (:8080 + WS :8081)
+npm run dev --workspace=@ava/agent         # Demo store (:3001)
+npm run dev:integration                    # Demo integration wizard (:4002)
+npm run dev:demo                           # Server + store + integration wizard
+npm run dev:widget                         # Widget dev (:5173)
+npm run dev:dashboard                      # Dashboard placeholder (not built yet)
+npm run db:generate                        # Prisma client generate
+npm run db:push                            # Apply schema to SQLite + generate client
+npm run db:push:fast                       # Apply schema only (skip generate)
+npm run db:seed                            # Seed friction catalog + MSWIM defaults
+npm run db:setup                           # db:generate + db:push + db:seed
+npm run build                              # Production build all apps
 ```
 
 ## Environment
@@ -89,12 +94,14 @@ DB overrides env defaults via `ScoringConfig` table.
 ## Go-Live Modes & Thresholds
 
 `active` (full mode) when all pass:
+
 - Behavior mapping coverage `>= 85%` (B001-B614)
 - Friction mapping coverage `>= 80%` (F001-F325)
 - Average mapping confidence `>= 0.75`
 - Critical journeys pass: add-to-cart, cart, checkout, payment
 
 `limited_active` (revenue-protection mode) is allowed when thresholds are below target, with guardrails:
+
 - TRACK and EVALUATE run immediately.
 - INTERVENE is restricted to low-risk scope (PASSIVE + NUDGE by default).
 - Use only high-confidence mappings for automated actions.
