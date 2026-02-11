@@ -1,6 +1,7 @@
-import { InterventionRepo, SessionRepo } from "@ava/db";
+import { InterventionRepo, SessionRepo, SiteConfigRepo } from "@ava/db";
 import type { DecisionOutput } from "../evaluate/decision-engine.js";
 import type { EvaluationResult } from "../evaluate/evaluate.service.js";
+import { getAction } from "./action-registry.js";
 import { buildPayload } from "./payload-builder.js";
 
 export interface InterventionOutput {
@@ -12,6 +13,11 @@ export interface InterventionOutput {
   payload: Record<string, unknown>;
   mswimScore: number;
   tier: string;
+  runtimeMode: "active" | "limited_active";
+  guardApplied: boolean;
+  guardReason?: string;
+  originalType?: string;
+  originalActionCode?: string;
 }
 
 /**
@@ -24,21 +30,25 @@ export async function handleDecision(
 ): Promise<InterventionOutput | null> {
   if (decision.decision !== "fire" || !decision.type) return null;
 
+  const runtimeMode = await resolveRuntimeMode(sessionId);
+  const guardResult = applyRevenueFirstGuard(decision, runtimeMode);
+  const effectiveDecision = guardResult.decision;
+
   // Build the intervention payload
   const payload = buildPayload(
-    decision.type,
-    decision.actionCode,
-    decision.frictionId,
+    effectiveDecision.type ?? "passive",
+    effectiveDecision.actionCode,
+    effectiveDecision.frictionId,
     evaluation
   );
 
   // Persist intervention
   const intervention = await InterventionRepo.createIntervention({
     sessionId,
-    evaluationId: decision.evaluationId,
-    type: decision.type,
-    actionCode: decision.actionCode,
-    frictionId: decision.frictionId,
+    evaluationId: effectiveDecision.evaluationId,
+    type: effectiveDecision.type ?? "passive",
+    actionCode: effectiveDecision.actionCode,
+    frictionId: effectiveDecision.frictionId,
     payload: JSON.stringify(payload),
     mswimScoreAtFire: evaluation.compositeScore,
     tierAtFire: evaluation.tier,
@@ -50,12 +60,17 @@ export async function handleDecision(
   return {
     interventionId: intervention.id,
     sessionId,
-    type: decision.type,
-    actionCode: decision.actionCode,
-    frictionId: decision.frictionId,
+    type: effectiveDecision.type ?? "passive",
+    actionCode: effectiveDecision.actionCode,
+    frictionId: effectiveDecision.frictionId,
     payload,
     mswimScore: evaluation.compositeScore,
     tier: evaluation.tier,
+    runtimeMode,
+    guardApplied: guardResult.applied,
+    guardReason: guardResult.reason,
+    originalType: guardResult.applied ? decision.type : undefined,
+    originalActionCode: guardResult.applied ? decision.actionCode : undefined,
   };
 }
 
@@ -80,4 +95,64 @@ export async function recordInterventionOutcome(
   }
 
   return intervention;
+}
+
+type RuntimeMode = "active" | "limited_active";
+
+async function resolveRuntimeMode(sessionId: string): Promise<RuntimeMode> {
+  const session = await SessionRepo.getSession(sessionId);
+  if (!session) return "limited_active";
+
+  const siteConfig = await SiteConfigRepo.getSiteConfigByUrl(session.siteUrl);
+  if (!siteConfig) return "limited_active";
+
+  return siteConfig.integrationStatus === "active" ? "active" : "limited_active";
+}
+
+function applyRevenueFirstGuard(
+  decision: DecisionOutput,
+  runtimeMode: RuntimeMode
+): {
+  decision: DecisionOutput;
+  applied: boolean;
+  reason?: string;
+} {
+  if (runtimeMode !== "limited_active") {
+    return { decision, applied: false };
+  }
+
+  if (decision.decision !== "fire" || !decision.type) {
+    return { decision, applied: false };
+  }
+
+  if (decision.type === "passive" || decision.type === "nudge") {
+    const safeActionCode = enforceLowRiskAction(decision.type, decision.actionCode);
+    if (safeActionCode === decision.actionCode) {
+      return { decision, applied: false };
+    }
+    return {
+      decision: { ...decision, actionCode: safeActionCode },
+      applied: true,
+      reason: "limited_active_low_risk_action_adjustment",
+    };
+  }
+
+  return {
+    decision: {
+      ...decision,
+      type: "nudge",
+      actionCode: "nudge_suggestion",
+    },
+    applied: true,
+    reason: `limited_active_downgrade_${decision.type}_to_nudge`,
+  };
+}
+
+function enforceLowRiskAction(type: "passive" | "nudge", actionCode: string): string {
+  const action = getAction(actionCode);
+  if (action && action.tier === type) {
+    return actionCode;
+  }
+
+  return type === "passive" ? "passive_info_adjust" : "nudge_suggestion";
 }

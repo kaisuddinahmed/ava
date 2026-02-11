@@ -5,6 +5,7 @@ import {
 } from "@ava/db";
 import { analyzeSite, reanalyzeSite } from "../site-analyzer/analyzer.service.js";
 import { runAnalyzerPipeline } from "./analyzer-runner.js";
+import { broadcastOnboardingProgress } from "./progress-broadcaster.js";
 
 export interface StartOnboardingInput {
   siteId?: string;
@@ -53,9 +54,19 @@ export async function startOnboardingRun(
     throw new Error("Site config not found");
   }
 
+  const latestRun = await AnalyzerRunRepo.getLatestAnalyzerRunBySite(siteConfig.id);
+  if (latestRun && latestRun.status === "running") {
+    return {
+      runId: latestRun.id,
+      siteId: siteConfig.id,
+      status: latestRun.status,
+      phase: latestRun.phase,
+    };
+  }
+
   const run = await AnalyzerRunRepo.createAnalyzerRun({
     siteConfigId: siteConfig.id,
-    status: "running",
+    status: "queued",
     phase: "detect_platform",
   });
 
@@ -73,6 +84,18 @@ export async function startOnboardingRun(
       }),
     }),
   ]);
+
+  broadcastOnboardingProgress({
+    siteConfigId: siteConfig.id,
+    analyzerRunId: run.id,
+    status: "analyzing",
+    progress: 10,
+    details: {
+      phase: "detect_platform",
+      message: "Onboarding run started",
+      startedAt: run.startedAt.toISOString(),
+    },
+  });
 
   triggerAnalyzer(run.id);
 
@@ -96,4 +119,3 @@ function triggerAnalyzer(runId: string) {
       runningRuns.delete(runId);
     });
 }
-

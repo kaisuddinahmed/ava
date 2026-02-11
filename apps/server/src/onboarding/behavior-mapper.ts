@@ -33,6 +33,7 @@ export async function mapBehaviorsForRun(input: {
   trackingHooks: TrackingHooks;
 }): Promise<BehaviorMappingResult> {
   const catalog = await getBehaviorCatalog();
+  await BehaviorMappingRepo.deleteBehaviorMappingsBySite(input.siteConfigId);
   const siteFunctions = buildSiteFunctionContext(input.trackingHooks);
   const fallbackFunction = firstAvailableFunction(siteFunctions) ?? "navigation";
 
@@ -250,4 +251,3 @@ function keywordScore(text: string, keywords: string[]): number {
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
-

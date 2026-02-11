@@ -33,6 +33,7 @@ export async function mapFrictionsForRun(input: {
   trackingHooks: TrackingHooks;
 }): Promise<FrictionMappingResult> {
   const catalog = getFrictionCatalog();
+  await FrictionMappingRepo.deleteFrictionMappingsBySite(input.siteConfigId);
   const siteFunctions = buildSiteFunctionContext(input.trackingHooks);
   const fallbackFunction = firstAvailableFunction(siteFunctions) ?? "navigation";
 
@@ -266,4 +267,3 @@ function keywordScore(text: string, keywords: string[]): number {
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
-

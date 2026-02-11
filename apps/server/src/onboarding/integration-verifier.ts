@@ -42,10 +42,18 @@ export async function verifyIntegrationReadiness(input: {
   siteConfigId: string;
   trackingHooks: TrackingHooks;
 }): Promise<VerificationResult> {
-  const [behaviorMappings, frictionMappings] = await Promise.all([
+  const [behaviorMappingsRaw, frictionMappingsRaw] = await Promise.all([
     BehaviorMappingRepo.listBehaviorMappingsByRun(input.analyzerRunId, 1000),
     FrictionMappingRepo.listFrictionMappingsByRun(input.analyzerRunId, 1000),
   ]);
+  const behaviorMappings = behaviorMappingsRaw as Array<{
+    confidence: number;
+    patternId: string;
+  }>;
+  const frictionMappings = frictionMappingsRaw as Array<{
+    confidence: number;
+    frictionId: string;
+  }>;
 
   const highConfidenceBehavior = behaviorMappings.filter(
     (mapping) => mapping.confidence >= 0.75,
@@ -119,4 +127,3 @@ export async function verifyIntegrationReadiness(input: {
 function round(value: number): number {
   return Math.round(value * 100) / 100;
 }
-

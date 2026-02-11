@@ -11,6 +11,7 @@ import {
   FULL_ACTIVE_THRESHOLDS,
   verifyIntegrationReadiness,
 } from "./integration-verifier.js";
+import { broadcastOnboardingProgress } from "./progress-broadcaster.js";
 
 export async function runAnalyzerPipeline(analyzerRunId: string): Promise<void> {
   const run = await AnalyzerRunRepo.getAnalyzerRun(analyzerRunId);
@@ -22,6 +23,11 @@ export async function runAnalyzerPipeline(analyzerRunId: string): Promise<void> 
   const trackingHooks = parseTrackingHooks(run.siteConfig.trackingConfig, platform);
 
   try {
+    await AnalyzerRunRepo.updateAnalyzerRun(analyzerRunId, {
+      status: "running",
+      phase: "detect_platform",
+    });
+
     await pushProgress({
       siteConfigId,
       analyzerRunId,
@@ -160,5 +166,12 @@ async function pushProgress(input: {
     progress: input.progress,
     details: JSON.stringify(input.details),
   });
-}
 
+  broadcastOnboardingProgress({
+    siteConfigId: input.siteConfigId,
+    analyzerRunId: input.analyzerRunId,
+    status: input.status,
+    progress: input.progress,
+    details: input.details,
+  });
+}

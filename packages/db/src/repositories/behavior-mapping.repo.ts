@@ -131,3 +131,10 @@ export async function countDistinctBehaviorPatterns(
   });
   return rows.length;
 }
+
+export async function deleteBehaviorMappingsBySite(siteConfigId: string) {
+  const db = prisma as any;
+  return db.behaviorPatternMapping.deleteMany({
+    where: { siteConfigId },
+  });
+}

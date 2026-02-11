@@ -164,6 +164,10 @@ export const IntegrationActivateSchema = z.object({
   notes: z.string().max(2000).optional(),
 });
 
+export const IntegrationVerifySchema = z.object({
+  runId: z.string().optional(),
+});
+
 // ============================================================================
 // UTILITY
 // ============================================================================

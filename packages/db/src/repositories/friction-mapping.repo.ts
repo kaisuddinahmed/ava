@@ -125,3 +125,10 @@ export async function countDistinctFrictions(
   });
   return rows.length;
 }
+
+export async function deleteFrictionMappingsBySite(siteConfigId: string) {
+  const db = prisma as any;
+  return db.frictionMapping.deleteMany({
+    where: { siteConfigId },
+  });
+}

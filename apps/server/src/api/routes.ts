@@ -38,4 +38,5 @@ apiRouter.get("/onboarding/:runId/status", onboardingApi.getOnboardingStatus);
 apiRouter.get("/onboarding/:runId/results", onboardingApi.getOnboardingResults);
 
 // Integration
+apiRouter.post("/integration/:siteId/verify", integrationApi.verifyIntegration);
 apiRouter.post("/integration/:siteId/activate", integrationApi.activateIntegration);

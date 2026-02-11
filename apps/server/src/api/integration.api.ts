@@ -4,13 +4,90 @@ import {
   IntegrationStatusRepo,
   SiteConfigRepo,
 } from "@ava/db";
-import { IntegrationActivateSchema } from "../validation/schemas.js";
+import type { TrackingHooks } from "../site-analyzer/hook-generator.js";
+import { generateHooks } from "../site-analyzer/hook-generator.js";
+import {
+  FULL_ACTIVE_THRESHOLDS,
+  verifyIntegrationReadiness,
+} from "../onboarding/integration-verifier.js";
+import {
+  IntegrationActivateSchema,
+  IntegrationVerifySchema,
+} from "../validation/schemas.js";
 
-const GO_LIVE_THRESHOLDS = {
-  behaviorCoveragePct: 85,
-  frictionCoveragePct: 80,
-  avgConfidence: 0.75,
-} as const;
+/**
+ * POST /api/integration/:siteId/verify
+ * Re-runs verification for the latest analyzer run (or an explicit runId).
+ */
+export async function verifyIntegration(req: Request, res: Response) {
+  try {
+    const parsed = IntegrationVerifySchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      res.status(400).json({
+        error: "Validation failed",
+        details: parsed.error.issues,
+      });
+      return;
+    }
+
+    const siteId = readParam(req.params.siteId);
+    if (!siteId) {
+      res.status(400).json({ error: "siteId is required" });
+      return;
+    }
+    const site = await SiteConfigRepo.getSiteConfig(siteId);
+    if (!site) {
+      res.status(404).json({ error: "Site config not found" });
+      return;
+    }
+
+    const run = parsed.data.runId
+      ? await AnalyzerRunRepo.getAnalyzerRun(parsed.data.runId)
+      : await AnalyzerRunRepo.getLatestAnalyzerRunBySite(siteId);
+
+    if (!run || run.siteConfigId !== siteId) {
+      res.status(404).json({ error: "Analyzer run not found for this site" });
+      return;
+    }
+
+    const verification = await verifyIntegrationReadiness({
+      analyzerRunId: run.id,
+      siteConfigId: siteId,
+      trackingHooks: parseTrackingHooks(site.trackingConfig, site.platform),
+    });
+
+    await Promise.all([
+      AnalyzerRunRepo.updateAnalyzerRun(run.id, {
+        phase: "verify",
+        behaviorCoverage: verification.behaviorCoveragePct,
+        frictionCoverage: verification.frictionCoveragePct,
+        avgConfidence: verification.avgConfidence,
+      }),
+      IntegrationStatusRepo.createIntegrationStatus({
+        siteConfigId: siteId,
+        analyzerRunId: run.id,
+        status: "verified",
+        progress: 90,
+        details: JSON.stringify({
+          phase: "verify",
+          verification,
+          thresholds: FULL_ACTIVE_THRESHOLDS,
+        }),
+      }),
+    ]);
+
+    res.json({
+      siteId,
+      runId: run.id,
+      verification,
+      thresholds: FULL_ACTIVE_THRESHOLDS,
+      recommendedMode: verification.recommendedMode,
+    });
+  } catch (error) {
+    console.error("[API] Verify integration error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+}
 
 /**
  * POST /api/integration/:siteId/activate
@@ -27,7 +104,11 @@ export async function activateIntegration(req: Request, res: Response) {
       return;
     }
 
-    const { siteId } = req.params;
+    const siteId = readParam(req.params.siteId);
+    if (!siteId) {
+      res.status(400).json({ error: "siteId is required" });
+      return;
+    }
     const payload = parsed.data;
 
     const site = await SiteConfigRepo.getSiteConfig(siteId);
@@ -37,15 +118,20 @@ export async function activateIntegration(req: Request, res: Response) {
     }
 
     const latestRun = await AnalyzerRunRepo.getLatestAnalyzerRunBySite(siteId);
+    const verification = latestRun
+      ? await verifyIntegrationReadiness({
+          analyzerRunId: latestRun.id,
+          siteConfigId: siteId,
+          trackingHooks: parseTrackingHooks(site.trackingConfig, site.platform),
+        })
+      : null;
 
     const gates = {
-      behaviorCoverage:
-        (latestRun?.behaviorCoverage ?? 0) >= GO_LIVE_THRESHOLDS.behaviorCoveragePct,
-      frictionCoverage:
-        (latestRun?.frictionCoverage ?? 0) >= GO_LIVE_THRESHOLDS.frictionCoveragePct,
-      avgConfidence:
-        (latestRun?.avgConfidence ?? 0) >= GO_LIVE_THRESHOLDS.avgConfidence,
-      criticalJourneys: payload.criticalJourneysPassed,
+      behaviorCoverage: (verification?.behaviorCoveragePct ?? 0) >= FULL_ACTIVE_THRESHOLDS.behaviorCoveragePct,
+      frictionCoverage: (verification?.frictionCoveragePct ?? 0) >= FULL_ACTIVE_THRESHOLDS.frictionCoveragePct,
+      avgConfidence: (verification?.avgConfidence ?? 0) >= FULL_ACTIVE_THRESHOLDS.avgConfidence,
+      criticalJourneys:
+        verification?.criticalJourneysPassed ?? payload.criticalJourneysPassed,
     };
 
     const canBeFullyActive =
@@ -61,7 +147,7 @@ export async function activateIntegration(req: Request, res: Response) {
           error:
             "Cannot activate in full mode. Thresholds not met; use limited_active or mode=auto.",
           gates,
-          thresholds: GO_LIVE_THRESHOLDS,
+          thresholds: FULL_ACTIVE_THRESHOLDS,
         });
         return;
       }
@@ -73,7 +159,16 @@ export async function activateIntegration(req: Request, res: Response) {
     }
 
     if (latestRun && latestRun.status !== "failed") {
-      await AnalyzerRunRepo.completeAnalyzerRun(latestRun.id, { phase: "activate" });
+      await AnalyzerRunRepo.completeAnalyzerRun(latestRun.id, {
+        phase: "activate",
+        ...(verification
+          ? {
+              behaviorCoverage: verification.behaviorCoveragePct,
+              frictionCoverage: verification.frictionCoveragePct,
+              avgConfidence: verification.avgConfidence,
+            }
+          : {}),
+      });
     }
 
     await Promise.all([
@@ -86,7 +181,8 @@ export async function activateIntegration(req: Request, res: Response) {
         details: JSON.stringify({
           mode,
           gates,
-          thresholds: GO_LIVE_THRESHOLDS,
+          thresholds: FULL_ACTIVE_THRESHOLDS,
+          verification,
           notes: payload.notes,
         }),
       }),
@@ -96,7 +192,8 @@ export async function activateIntegration(req: Request, res: Response) {
       siteId,
       mode,
       gates,
-      thresholds: GO_LIVE_THRESHOLDS,
+      thresholds: FULL_ACTIVE_THRESHOLDS,
+      verification,
       runId: latestRun?.id ?? null,
     });
   } catch (error) {
@@ -105,3 +202,19 @@ export async function activateIntegration(req: Request, res: Response) {
   }
 }
 
+function parseTrackingHooks(trackingConfig: string, platform: string): TrackingHooks {
+  try {
+    const parsed = JSON.parse(trackingConfig) as TrackingHooks;
+    if (parsed?.selectors && parsed?.eventMappings) {
+      return parsed;
+    }
+  } catch {
+    // Fallback below.
+  }
+  return generateHooks(platform);
+}
+
+function readParam(value: string | string[] | undefined): string {
+  if (Array.isArray(value)) return value[0] ?? "";
+  return value ?? "";
+}

@@ -3,11 +3,19 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "main": "src/index.ts",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
   "scripts": {
     "build": "tsc",
-    "db:push": "prisma db push",
-    "db:generate": "prisma generate",
+    "db:push": "DATABASE_URL=${DATABASE_URL:-file:./dev.db} prisma db push",
+    "db:push:fast": "DATABASE_URL=${DATABASE_URL:-file:./dev.db} prisma db push --skip-generate",
+    "db:generate": "DATABASE_URL=${DATABASE_URL:-file:./dev.db} prisma generate",
     "db:studio": "prisma studio"
   },
   "dependencies": {

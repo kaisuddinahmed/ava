@@ -1,6 +1,7 @@
 {
   "name": "ava",
   "private": true,
+  "packageManager": "npm@11.6.2",
   "workspaces": [
     "packages/*",
     "apps/*"
@@ -12,15 +13,16 @@
     "dev:dashboard": "turbo run dev --filter=@ava/dashboard",
     "dev:widget": "turbo run dev --filter=@ava/widget",
     "dev:demo": "turbo run dev --filter=@ava/demo",
-    "db:push": "turbo run db:push --filter=@ava/db",
-    "db:generate": "turbo run db:generate --filter=@ava/db",
+    "db:push": "prisma db push --schema packages/db/prisma/schema.prisma",
+    "db:push:fast": "prisma db push --skip-generate --schema packages/db/prisma/schema.prisma",
+    "db:generate": "prisma generate --schema packages/db/prisma/schema.prisma",
     "db:seed": "tsx scripts/seed-friction-catalog.ts && tsx scripts/seed-mswim-defaults.ts",
     "db:setup": "npm run db:generate && npm run db:push && npm run db:seed"
   },
   "devDependencies": {
     "@rollup/rollup-darwin-arm64": "^4.57.1",
     "concurrently": "^9.2.1",
-    "prisma": "6.3.0",
+    "prisma": "^6.3.0",
     "shell-quote": "^1.8.3",
     "tsx": "^4.19.0",
     "turbo": "^2.3.0",
@@ -28,7 +30,7 @@
     "yargs": "^18.0.0"
   },
   "dependencies": {
-    "@prisma/client": "6.3.0",
+    "@prisma/client": "^6.3.0",
     "array-flatten": "^3.0.0",
     "dotenv": "^17.2.3",
     "express": "^5.2.1"
