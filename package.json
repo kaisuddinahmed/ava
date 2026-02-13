@@ -13,7 +13,7 @@
     "dev:dashboard": "turbo run dev --filter=@ava/dashboard",
     "dev:widget": "turbo run dev --filter=@ava/widget",
     "dev:integration": "npm run dev --workspace=@ava/demo",
-    "dev:demo": "concurrently -k -n server,store,wizard -c blue,green,magenta \"npm run dev:server\" \"npm run dev --workspace=@ava/agent\" \"npm run dev:integration\"",
+    "dev:demo": "node scripts/dev-demo.mjs",
     "db:push": "prisma db push --schema packages/db/prisma/schema.prisma",
     "db:push:fast": "prisma db push --skip-generate --schema packages/db/prisma/schema.prisma",
     "db:generate": "prisma generate --schema packages/db/prisma/schema.prisma",
