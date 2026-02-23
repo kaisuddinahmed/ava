@@ -36,6 +36,9 @@ yarn-error.log*
 # Turborepo cache
 .turbo
 
+# Internal docs (local reference only)
+docs/
+
 # SQLite dev database
 *.db
 *.db-journal
