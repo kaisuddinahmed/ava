@@ -75,7 +75,9 @@ export class ClickObserver {
         });
       }
 
-      // --- General click tracking ---
+      // --- General click tracking (with normalized coordinates for heatmap) ---
+      const vw = window.innerWidth || 1;
+      const vh = window.innerHeight || 1;
       this.bridge.send("behavioral_event", {
         event_id: this.uid(),
         friction_id: null,
@@ -86,6 +88,13 @@ export class ClickObserver {
           target_text: target.textContent?.slice(0, 50) || "",
           is_interactive: isInteractive,
           total_clicks: this.clickCount,
+          // Heatmap coordinates — normalized to 0-1 range
+          x_pct: Math.round((e.clientX / vw) * 1000) / 1000,
+          y_pct: Math.round((e.clientY / vh) * 1000) / 1000,
+          client_x: e.clientX,
+          client_y: e.clientY,
+          viewport_width: vw,
+          viewport_height: vh,
         },
         timestamp: now,
       });

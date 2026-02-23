@@ -82,10 +82,11 @@ export async function getEvaluationsBySite(siteUrl: string, limit = 50) {
 }
 
 /**
- * List all evaluations with optional limit (for analytics).
+ * List all evaluations with optional limit and time filter (for analytics).
  */
-export async function listEvaluations(options?: { limit?: number }) {
+export async function listEvaluations(options?: { limit?: number; since?: Date }) {
   return prisma.evaluation.findMany({
+    where: options?.since ? { timestamp: { gte: options.since } } : {},
     orderBy: { timestamp: "desc" },
     take: options?.limit ?? 100,
   });

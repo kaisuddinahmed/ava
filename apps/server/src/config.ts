@@ -34,6 +34,40 @@ export const config = {
     batchMaxEvents: 10,
     maxContextEvents: 50,   // last 50 events for context
   },
+
+  shadow: {
+    enabled: process.env.SHADOW_MODE_ENABLED === "true" || process.env.SHADOW_MODE_ENABLED === "1",
+    logToConsole: process.env.SHADOW_LOG_CONSOLE === "true",
+  },
+
+  // Evaluation engine selection:
+  //   "llm"  — Full LLM call + MSWIM (default, current behavior)
+  //   "fast" — Rule-derived signals + MSWIM, zero LLM calls
+  //   "auto" — Fast engine first, escalates to LLM for high-stakes scenarios
+  evalEngine: (process.env.EVAL_ENGINE ?? "llm") as "llm" | "fast" | "auto",
+
+  // Job scheduler
+  jobs: {
+    nightlyHourUTC: Number(process.env.NIGHTLY_BATCH_HOUR ?? 2),
+    canaryCheckIntervalHours: Number(process.env.CANARY_CHECK_HOURS ?? 4),
+    hourlySnapshotEnabled: process.env.HOURLY_SNAPSHOT_ENABLED !== "false",
+    disableScheduler: process.env.DISABLE_SCHEDULER === "true",
+  },
+
+  // Drift detection thresholds
+  drift: {
+    tierAgreementFloor: Number(process.env.DRIFT_TIER_AGREEMENT_FLOOR ?? 0.70),
+    decisionAgreementFloor: Number(process.env.DRIFT_DECISION_AGREEMENT_FLOOR ?? 0.75),
+    maxCompositeDivergence: Number(process.env.DRIFT_MAX_DIVERGENCE ?? 15),
+    signalShiftThreshold: Number(process.env.DRIFT_SIGNAL_SHIFT ?? 10),
+    conversionRateDropPercent: Number(process.env.DRIFT_CONVERSION_DROP ?? 0.20),
+    snapshotRetentionDays: Number(process.env.DRIFT_RETENTION_DAYS ?? 90),
+  },
+
+  // Experiment framework
+  experiments: {
+    enabled: process.env.EXPERIMENTS_ENABLED !== "false",
+  },
 } as const;
 
 export type Config = typeof config;

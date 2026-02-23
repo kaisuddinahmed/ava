@@ -1,0 +1,418 @@
+import { useMemo, useState } from "react";
+import type { TrackEventData, OverviewAnalytics } from "../types";
+import { fmtTime, fmtNum, fmtPct, fmtScore } from "../lib/format";
+
+interface Props {
+  events: TrackEventData[];
+  selectedSession: string | null;
+  overview: OverviewAnalytics | null;
+  trafficData: any[] | null;
+  deviceData: any[] | null;
+  funnelData: any[] | null;
+  flowData: any[] | null;
+  pageStatsData: any[] | null;
+  clickPoints: Array<{ xPct: number; yPct: number; pageUrl: string }> | null;
+}
+
+/** Parse raw_signals JSON and build a human-readable one-liner. */
+function describeEvent(e: TrackEventData): string {
+  const evtType = e.eventType || e.event_type || "unknown";
+  let signals: Record<string, any> = {};
+  try {
+    signals = typeof e.rawSignals === "string" ? JSON.parse(e.rawSignals) : e.rawSignals ?? {};
+  } catch {
+    // ignore
+  }
+
+  const name = signals.product_name;
+  const price = signals.product_price;
+  const cat = signals.product_category || signals.category;
+
+  switch (evtType) {
+    case "page_view":
+      return `Visited ${signals.page_title || "page"}`;
+    case "product_click":
+      return name ? `Clicked ${name}${price ? ` (${price})` : ""}` : "Clicked product";
+    case "product_detail_view":
+      return name ? `Viewing ${name}${price ? ` — ${price}` : ""}` : "Opened product details";
+    case "product_detail_close": {
+      const dur = signals.view_duration_ms;
+      const durText = dur ? ` after ${dur >= 60000 ? Math.round(dur / 60000) + "m" : Math.round(dur / 1000) + "s"} of viewing` : "";
+      return name ? `Closed ${name}${durText}` : "Closed product details";
+    }
+    case "add_to_cart":
+      return name ? `Added ${name} to cart${price ? ` (${price})` : ""}` : "Added item to cart";
+    case "quick_add":
+      return name ? `Quick-added ${name}` : `Quick-added ${signals.product_id || "item"}`;
+    case "quantity_change":
+      return `Qty ${signals.direction === "increase" ? "+" : "-"} → ${signals.current_qty}${name ? ` for ${name}` : ""}`;
+    case "category_browse":
+      return `Browsing ${cat || signals.category || "category"}`;
+    case "nav_click":
+      return `Nav → ${signals.link_text || "link"}`;
+    case "color_select":
+      return `Selected color: ${signals.color}${name ? ` on ${name}` : ""}`;
+    case "size_select":
+      return `Selected size: ${signals.size}${name ? ` on ${name}` : ""}`;
+    case "tab_view":
+      return `Viewing ${signals.tab_name || "tab"}${name ? ` for ${name}` : ""}`;
+    case "search_query":
+      return `Searched: "${signals.query}"`;
+    case "scroll_depth":
+      return `Scrolled to ${signals.depth_pct}%`;
+    case "scroll_without_click":
+      return `Scrolled full page without clicking`;
+    case "rage_click":
+      return `Rage-clicked ${signals.target_text || signals.target_element || "element"} (${signals.click_count}x)`;
+    case "hover_add_to_cart":
+      return `Hovering Add to Cart${name ? ` on ${name}` : ""} (${Math.round((signals.hover_duration_ms || 3000) / 1000)}s)`;
+    case "copy_price":
+      return `Copied price: ${signals.copied_text}`;
+    case "copy_text":
+      return `Copied: "${signals.copied_text}"`;
+    case "exit_intent_with_cart":
+      return `Exit intent — cart $${signals.cart_value}`;
+    case "idle_with_cart":
+      return `Idle 5min with ${signals.cart_items} item(s) in cart`;
+    case "tab_return":
+      return `Returned after ${Math.round((signals.away_duration_ms || 0) / 60000)}min away`;
+    case "cart_icon_click":
+      return `Opened cart (${signals.cart_count} items)`;
+    case "sort_change":
+      return `Sorted by: ${signals.sort_value}`;
+    case "form_validation_error":
+      return `Form error on ${signals.field_name || "field"} (${signals.error_count} errors)`;
+    case "payment_hesitation":
+      return `Hesitated on ${signals.field_name} (${Math.round((signals.hesitation_ms || 0) / 1000)}s)`;
+    case "click":
+      if (name) return `Clicked ${signals.text || "element"} on ${name}`;
+      return `Clicked: ${signals.text || signals.element || "element"}`;
+    default:
+      if (name) return `${evtType} — ${name}`;
+      return evtType.replace(/_/g, " ");
+  }
+}
+
+function getCategoryColor(cat: string): string {
+  switch (cat) {
+    case "product": return "#e89b3b";
+    case "cart": return "#e05d5d";
+    case "navigation": return "#5b9bd5";
+    case "search": return "#9b59b6";
+    case "engagement": return "#6bc9a0";
+    case "technical": return "#e74c3c";
+    case "checkout": return "#f39c12";
+    default: return "#95a5a6";
+  }
+}
+
+function fmtDuration(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  if (ms < 60000) return `${Math.round(ms / 1000)}s`;
+  return `${Math.round(ms / 60000)}m`;
+}
+
+/** Simple SVG heatmap dot renderer */
+function HeatmapCanvas({ points }: { points: Array<{ xPct: number; yPct: number }> }) {
+  if (points.length === 0) {
+    return (
+      <div className="empty-state" style={{ padding: 16 }}>
+        <p className="muted" style={{ fontSize: 11 }}>No click data yet — coordinates captured on next visit</p>
+      </div>
+    );
+  }
+  return (
+    <svg
+      viewBox="0 0 100 60"
+      style={{ width: "100%", height: 160, background: "rgba(8,26,34,0.4)", borderRadius: 4, display: "block" }}
+    >
+      {points.slice(0, 500).map((p, i) => (
+        <circle
+          key={i}
+          cx={p.xPct * 100}
+          cy={p.yPct * 60}
+          r={1.5}
+          fill="rgba(232,155,59,0.35)"
+        />
+      ))}
+    </svg>
+  );
+}
+
+/** Collapsible section wrapper */
+function Section({ title, children, defaultOpen = true }: { title: string; children: React.ReactNode; defaultOpen?: boolean }) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div className="card" style={{ marginBottom: 12 }}>
+      <div
+        className="card-head"
+        style={{ cursor: "pointer", userSelect: "none" }}
+        onClick={() => setOpen(o => !o)}
+      >
+        <span>{title}</span>
+        <span style={{ fontWeight: 400, textTransform: "none", fontSize: 10, opacity: 0.6 }}>
+          {open ? "▲ collapse" : "▼ expand"}
+        </span>
+      </div>
+      {open && <div className="card-body">{children}</div>}
+    </div>
+  );
+}
+
+export function TrackTab({ events, selectedSession, overview, trafficData, deviceData, funnelData, flowData, pageStatsData, clickPoints }: Props) {
+  const filtered = useMemo(
+    () => selectedSession ? events.filter(() => true) : events,
+    [events, selectedSession]
+  );
+
+  const categoryCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const e of filtered) {
+      counts[e.category] = (counts[e.category] ?? 0) + 1;
+    }
+    return counts;
+  }, [filtered]);
+
+  const frictionCount = useMemo(
+    () => filtered.filter((e) => e.frictionId || e.friction_id).length,
+    [filtered]
+  );
+
+  const maxTraffic = trafficData ? Math.max(...trafficData.map((d: any) => d.sessions), 1) : 1;
+  const maxDevice = deviceData ? Math.max(...deviceData.map((d: any) => d.sessions), 1) : 1;
+  const firstFunnelCount = funnelData?.[0]?.sessionCount ?? 1;
+
+  return (
+    <div className="tab-content">
+      {/* ── Overview Metrics ────────────────────────────────── */}
+      <div className="grid-4" style={{ marginBottom: 12 }}>
+        <div className="metric-box">
+          <div className="label">Total Events</div>
+          <div className="value">{fmtNum(overview?.totalEvents ?? filtered.length)}</div>
+          <div className="sub">received</div>
+        </div>
+        <div className="metric-box">
+          <div className="label">Active Sessions</div>
+          <div className="value">{fmtNum(overview?.activeSessions ?? 0)}</div>
+          <div className="sub">live</div>
+        </div>
+        <div className="metric-box">
+          <div className="label">Bounce Rate</div>
+          <div className="value warn">
+            {overview?.bounceRate !== undefined ? fmtPct(overview.bounceRate) : "—"}
+          </div>
+          <div className="sub">single-page exits</div>
+        </div>
+        <div className="metric-box">
+          <div className="label">Avg Session</div>
+          <div className="value">
+            {overview?.avgSessionDurationMs ? fmtDuration(overview.avgSessionDurationMs) : "—"}
+          </div>
+          <div className="sub">{overview?.avgPageViewsPerSession ? `${overview.avgPageViewsPerSession} pages` : "duration"}</div>
+        </div>
+      </div>
+
+      {/* ── Category Breakdown ──────────────────────────────── */}
+      {Object.keys(categoryCounts).length > 0 && (
+        <div className="card" style={{ marginBottom: 12 }}>
+          <div className="card-head">Event Categories
+            <span style={{ fontWeight: 400, textTransform: "none", fontSize: 10, marginLeft: 8, opacity: 0.6 }}>
+              {fmtNum(frictionCount)} friction signals
+            </span>
+          </div>
+          <div className="card-body">
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {Object.entries(categoryCounts).sort((a, b) => b[1] - a[1]).map(([cat, count]) => (
+                <span key={cat} className="signal-chip">
+                  <span className="signal-label">{cat}</span>
+                  <span className="signal-value">{count}</span>
+                </span>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Traffic Sources + Devices ───────────────────────── */}
+      {(trafficData || deviceData) && (
+        <div className="grid-2" style={{ marginBottom: 12 }}>
+          {trafficData && (
+            <Section title="Traffic Sources" defaultOpen={true}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {trafficData.map((row: any) => (
+                  <div key={row.referrerType} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ minWidth: 64, fontSize: 10, textTransform: "capitalize", color: "var(--info)" }}>
+                      {row.referrerType}
+                    </span>
+                    <div style={{ flex: 1, height: 6, background: "rgba(8,26,34,0.6)", borderRadius: 3, overflow: "hidden" }}>
+                      <div style={{ width: `${(row.sessions / maxTraffic) * 100}%`, height: "100%", background: "var(--info)", borderRadius: 3, transition: "width 400ms ease" }} />
+                    </div>
+                    <span className="mono muted" style={{ fontSize: 10, minWidth: 32, textAlign: "right" }}>
+                      {fmtNum(row.sessions)}
+                    </span>
+                    <span style={{ fontSize: 9, color: "var(--accent)", minWidth: 36, textAlign: "right" }}>
+                      {fmtPct(row.conversionRate)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </Section>
+          )}
+          {deviceData && (
+            <Section title="Devices" defaultOpen={true}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {deviceData.map((row: any) => (
+                  <div key={row.deviceType} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ minWidth: 64, fontSize: 10, textTransform: "capitalize", color: "var(--tier-nudge)" }}>
+                      {row.deviceType}
+                    </span>
+                    <div style={{ flex: 1, height: 6, background: "rgba(8,26,34,0.6)", borderRadius: 3, overflow: "hidden" }}>
+                      <div style={{ width: `${(row.sessions / maxDevice) * 100}%`, height: "100%", background: "var(--tier-nudge)", borderRadius: 3, transition: "width 400ms ease" }} />
+                    </div>
+                    <span className="mono muted" style={{ fontSize: 10, minWidth: 32, textAlign: "right" }}>
+                      {fmtNum(row.sessions)}
+                    </span>
+                    <span style={{ fontSize: 9, color: "var(--accent)", minWidth: 36, textAlign: "right" }}>
+                      {fmtPct(row.conversionRate)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </Section>
+          )}
+        </div>
+      )}
+
+      {/* ── Funnel + Page Flow ─────────────────────────────── */}
+      {(funnelData || flowData) && (
+        <div className="grid-2" style={{ marginBottom: 12 }}>
+          {funnelData && (
+            <Section title="Conversion Funnel" defaultOpen={true}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {funnelData.map((step: any, i: number) => {
+                  const pct = firstFunnelCount > 0 ? (step.sessionCount / firstFunnelCount) * 100 : 0;
+                  return (
+                    <div key={step.step}>
+                      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>
+                        <span style={{ fontSize: 10, textTransform: "uppercase", color: "var(--info)" }}>{step.step}</span>
+                        <span style={{ fontSize: 10, color: "var(--muted)" }}>{fmtNum(step.sessionCount)} sessions ({Math.round(pct)}%)</span>
+                      </div>
+                      <div style={{ height: 6, background: "rgba(8,26,34,0.6)", borderRadius: 3, overflow: "hidden" }}>
+                        <div style={{ width: `${pct}%`, height: "100%", background: i === 0 ? "var(--accent)" : "var(--tier-nudge)", borderRadius: 3, transition: "width 400ms ease" }} />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </Section>
+          )}
+          {flowData && (
+            <Section title="Page Flow (top transitions)" defaultOpen={true}>
+              <div className="scroll-list" style={{ maxHeight: 180 }}>
+                {flowData.slice(0, 10).map((row: any, i: number) => (
+                  <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, padding: "3px 0", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+                    <span style={{ fontSize: 9, color: "var(--muted)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {row.from || "—"} → {row.to}
+                    </span>
+                    <span className="mono" style={{ fontSize: 10, color: "var(--accent)", flexShrink: 0 }}>{fmtNum(row.count)}×</span>
+                  </div>
+                ))}
+              </div>
+            </Section>
+          )}
+        </div>
+      )}
+
+      {/* ── Top Pages ─────────────────────────────────────── */}
+      {pageStatsData && pageStatsData.length > 0 && (
+        <Section title="Top Pages" defaultOpen={false}>
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 10 }}>
+              <thead>
+                <tr style={{ borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
+                  <th style={{ textAlign: "left", padding: "4px 8px", color: "var(--muted)", fontWeight: 600 }}>Page</th>
+                  <th style={{ textAlign: "right", padding: "4px 8px", color: "var(--muted)", fontWeight: 600 }}>Views</th>
+                  <th style={{ textAlign: "right", padding: "4px 8px", color: "var(--muted)", fontWeight: 600 }}>Avg Time</th>
+                  <th style={{ textAlign: "right", padding: "4px 8px", color: "var(--muted)", fontWeight: 600 }}>Avg Scroll</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pageStatsData.slice(0, 10).map((row: any, i: number) => (
+                  <tr key={i} style={{ borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+                    <td style={{ padding: "4px 8px", color: "var(--text)", maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {row.pageUrl || row.pageType}
+                    </td>
+                    <td style={{ padding: "4px 8px", textAlign: "right", color: "var(--info)" }}>{fmtNum(row.views)}</td>
+                    <td style={{ padding: "4px 8px", textAlign: "right", color: "var(--muted)" }}>
+                      {row.avgTimeOnPageMs ? fmtDuration(row.avgTimeOnPageMs) : "—"}
+                    </td>
+                    <td style={{ padding: "4px 8px", textAlign: "right", color: "var(--muted)" }}>
+                      {row.avgScrollDepthPct != null ? `${row.avgScrollDepthPct}%` : "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Section>
+      )}
+
+      {/* ── Heatmap ───────────────────────────────────────── */}
+      {clickPoints !== null && (
+        <Section title={`Click Heatmap (${fmtNum(clickPoints.length)} clicks)`} defaultOpen={false}>
+          <HeatmapCanvas points={clickPoints} />
+        </Section>
+      )}
+
+      {/* ── Live Event Feed ──────────────────────────────────── */}
+      <div className="card">
+        <div className="card-head">
+          <span>Live Event Feed</span>
+          <span style={{ fontWeight: 400, textTransform: "none", fontSize: 10 }}>
+            {filtered.length} events
+          </span>
+        </div>
+
+        {filtered.length === 0 ? (
+          <div className="empty-state">
+            <div className="empty-icon">&#x1F4E1;</div>
+            <p>Waiting for events...</p>
+            <p className="muted" style={{ fontSize: 11 }}>
+              Events will appear here as users interact with the store
+            </p>
+          </div>
+        ) : (
+          <div className="scroll-list">
+            {filtered.map((e, i) => {
+              const fid = e.frictionId || e.friction_id;
+              const desc = describeEvent(e);
+              const catColor = getCategoryColor(e.category);
+              return (
+                <div className="event-row" key={e.id ?? i}>
+                  <span className="time">{fmtTime(e.timestamp)}</span>
+                  <span
+                    className="cat"
+                    style={{
+                      backgroundColor: catColor + "22",
+                      color: catColor,
+                      border: `1px solid ${catColor}44`,
+                      borderRadius: 3,
+                      padding: "1px 6px",
+                      fontSize: 9,
+                      fontWeight: 700,
+                      textTransform: "uppercase",
+                    }}
+                  >
+                    {e.category}
+                  </span>
+                  <span className="desc" style={{ flex: 1 }}>{desc}</span>
+                  {fid && <span className="friction-tag">{fid}</span>}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

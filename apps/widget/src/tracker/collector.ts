@@ -1,5 +1,15 @@
 import { FISMBridge } from "./ws-transport.js";
 
+/**
+ * BehaviorCollector — richly-contextualized behavioral event tracking.
+ *
+ * Tracks: page views, product views, product clicks, add-to-cart,
+ * category navigation, search, scroll milestones, rage clicks,
+ * exit intent, form friction, idle, and more.
+ *
+ * Every event includes extracted product/element context from the DOM
+ * so the server and dashboard see *what* the user interacted with.
+ */
 export class BehaviorCollector {
   private bridge: FISMBridge;
   private observers: MutationObserver[] = [];
@@ -7,29 +17,46 @@ export class BehaviorCollector {
   private scrollDepth = 0;
   private pageEnterTime = Date.now();
   private rageClickTracker = { count: 0, lastTime: 0, lastX: 0, lastY: 0 };
+  private scrollMilestones = new Set<number>();
+  private lastProductModalId: string | null = null;
+  private productModalOpenedAt: number = 0;
+  private sequenceNumber = 0;
 
   constructor(bridge: FISMBridge, _sessionId: string, _userId: string | null) {
     this.bridge = bridge;
   }
 
   startCollecting(): void {
+    this.emitPageView();
+    this.trackProductViews();
+    this.trackClicks();
     this.trackScrollDepth();
     this.trackRageClicks();
-    this.trackDeadClicks();
     this.trackHoverIntent();
     this.trackFormFriction();
     this.trackCopyEvents();
     this.trackExitIntent();
     this.trackIdleTime();
     this.trackPageVisibility();
+    this.trackSearch();
   }
 
-  private emit(friction_id: string, category: string, signals: Record<string, any>): void {
-    this.bridge.send("behavioral_event", {
+  // ── Helpers ──────────────────────────────────────────────────
+
+  /** Build a standard track event payload and send it. */
+  private send(
+    category: string,
+    eventType: string,
+    signals: Record<string, any>,
+    frictionId: string | null = null,
+  ): void {
+    this.sequenceNumber++;
+    this.bridge.sendTrackEvent({
       event_id: `evt_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-      friction_id,
+      friction_id: frictionId,
       category,
-      raw_signals: signals,
+      event_type: eventType,
+      raw_signals: { ...signals, session_sequence_number: this.sequenceNumber },
       page_context: {
         page_type: this.detectPageType(),
         page_url: window.location.href,
@@ -42,29 +69,295 @@ export class BehaviorCollector {
     });
   }
 
-  // --- Scroll Depth ---
+  /** Extract product context from the nearest product card or modal. */
+  private extractProductContext(el: HTMLElement): Record<string, any> | null {
+    // 1. Inside a product card (.product-card[data-id])
+    const card = el.closest(".product-card, [data-id]") as HTMLElement | null;
+    if (card) {
+      const name = card.querySelector("h3")?.textContent?.trim()
+        || card.querySelector("[class*='product-name']")?.textContent?.trim();
+      const price = card.querySelector("[data-analyze='price'], .price-tag")?.textContent?.trim();
+      const category = card.querySelector("[class*='text-amber']")?.textContent?.trim()
+        || card.querySelector(".category")?.textContent?.trim();
+      return {
+        product_id: card.dataset.id || null,
+        product_name: name || null,
+        product_price: price || null,
+        product_category: category || null,
+        source: "product_card",
+      };
+    }
+
+    // 2. Inside the product detail modal (#product-modal)
+    const modal = el.closest("#product-modal") || document.getElementById("product-modal");
+    if (modal && !modal.classList.contains("hidden")) {
+      const name = modal.querySelector("h2")?.textContent?.trim()
+        || modal.querySelector("[class*='product-title']")?.textContent?.trim();
+      const price = modal.querySelector("[data-analyze='price'], .price-tag")?.textContent?.trim()
+        || modal.querySelector("span.font-bold")?.textContent?.trim();
+      const category = modal.querySelector("[class*='text-amber']")?.textContent?.trim();
+      return {
+        product_name: name || null,
+        product_price: price || null,
+        product_category: category || null,
+        source: "product_modal",
+      };
+    }
+
+    return null;
+  }
+
+  /** Extract meaningful text from an element */
+  private getElementLabel(el: HTMLElement): string {
+    return (
+      el.getAttribute("aria-label")
+      || el.getAttribute("title")
+      || el.textContent?.trim().slice(0, 80)
+      || el.tagName
+    );
+  }
+
+  // ── Page View ────────────────────────────────────────────────
+
+  private emitPageView(): void {
+    this.send("navigation", "page_view", {
+      referrer: document.referrer || "direct",
+      page_title: document.title,
+    });
+  }
+
+  // ── Product Detail View (modal open detection) ───────────────
+
+  private trackProductViews(): void {
+    const modal = document.getElementById("product-modal");
+    if (!modal) return;
+
+    const observer = new MutationObserver(() => {
+      if (!modal.classList.contains("hidden")) {
+        // Modal visible — extract product info
+        setTimeout(() => {
+          const name = modal.querySelector("h2")?.textContent?.trim();
+          const price = modal.querySelector("[data-analyze='price'], .price-tag")?.textContent?.trim()
+            || modal.querySelector(".font-bold.text-2xl, .font-bold.text-xl")?.textContent?.trim();
+          const category = modal.querySelector("[class*='text-amber']")?.textContent?.trim();
+
+          const productKey = name || "";
+          if (productKey && productKey !== this.lastProductModalId) {
+            this.lastProductModalId = productKey;
+            this.productModalOpenedAt = Date.now();
+            this.send("product", "product_detail_view", {
+              product_name: name || "Unknown",
+              product_price: price || "N/A",
+              product_category: category || "unknown",
+            });
+          }
+        }, 100); // slight delay for DOM to populate
+      } else {
+        if (this.lastProductModalId) {
+          const viewDurationMs = Date.now() - this.productModalOpenedAt;
+          this.send("product", "product_detail_close", {
+            product_name: this.lastProductModalId,
+            view_duration_ms: viewDurationMs,
+          });
+        }
+        this.lastProductModalId = null;
+        this.productModalOpenedAt = 0;
+      }
+    });
+
+    observer.observe(modal, { attributes: true, attributeFilter: ["class"] });
+    this.observers.push(observer);
+  }
+
+  // ── Click Tracking (rich context) ────────────────────────────
+
+  private trackClicks(): void {
+    document.addEventListener("click", (e) => {
+      const target = e.target as HTMLElement;
+
+      // --- Add to Cart (main button in modal) ---
+      const atcButton = target.closest("[data-action='add-to-cart'], .add-to-cart") as HTMLElement | null;
+      const isAtcByText = !atcButton && (
+        target.closest("button")?.textContent?.toLowerCase().includes("add to cart")
+      );
+      if (atcButton || isAtcByText) {
+        const product = this.extractProductContext(target);
+        this.send("cart", "add_to_cart", {
+          ...product,
+          button_text: (atcButton || target.closest("button"))?.textContent?.trim().slice(0, 50),
+        });
+        return;
+      }
+
+      // --- Quick-add + button on product card ---
+      const quickAdd = target.closest(".btn-add[data-id]") as HTMLElement | null;
+      if (quickAdd) {
+        const product = this.extractProductContext(target);
+        this.send("cart", "quick_add", {
+          product_id: quickAdd.dataset.id,
+          ...product,
+        });
+        return;
+      }
+
+      // --- Product card click (opens modal) ---
+      // Skipped: the MutationObserver on #product-modal fires a
+      // "product_detail_view" event which is richer and avoids duplicates.
+      const productTrigger = target.closest(".product-trigger") as HTMLElement | null;
+      if (productTrigger) {
+        return; // let product_detail_view handle it
+      }
+
+      // --- Category navigation ---
+      const navCategory = target.closest(".nav-category, [data-cat]") as HTMLElement | null;
+      if (navCategory) {
+        this.send("navigation", "category_browse", {
+          category: navCategory.getAttribute("data-cat") || navCategory.textContent?.trim(),
+        });
+        return;
+      }
+
+      // --- Nav links ---
+      const navLink = target.closest("[data-nav], nav a") as HTMLElement | null;
+      if (navLink) {
+        this.send("navigation", "nav_click", {
+          link_text: navLink.textContent?.trim(),
+          href: (navLink as HTMLAnchorElement).href || null,
+        });
+        return;
+      }
+
+      // --- Color/Size selection ---
+      const colorOption = target.closest(".color-option, [data-color]") as HTMLElement | null;
+      if (colorOption) {
+        const product = this.extractProductContext(target);
+        this.send("product", "color_select", {
+          color: colorOption.getAttribute("data-color") || colorOption.getAttribute("title") || "unknown",
+          ...product,
+        });
+        return;
+      }
+
+      const sizeOption = target.closest(".size-option, [data-size]") as HTMLElement | null;
+      if (sizeOption) {
+        const product = this.extractProductContext(target);
+        this.send("product", "size_select", {
+          size: sizeOption.textContent?.trim() || sizeOption.getAttribute("data-size"),
+          ...product,
+        });
+        return;
+      }
+
+      // --- Quantity change (+/-) ---
+      if (target.tagName === "BUTTON" && (target.textContent === "+" || target.textContent === "-")) {
+        const product = this.extractProductContext(target);
+        const qtyEl = target.parentElement?.querySelector("span");
+        this.send("cart", "quantity_change", {
+          direction: target.textContent === "+" ? "increase" : "decrease",
+          current_qty: qtyEl?.textContent?.trim() || "unknown",
+          ...product,
+        });
+        return;
+      }
+
+      // --- Tab click (Details/Returns/Reviews inside modal) ---
+      const modal = document.getElementById("product-modal");
+      if (modal && !modal.classList.contains("hidden") && target.closest("button, [role='tab']")) {
+        const text = target.textContent?.trim();
+        if (text && ["Details", "Returns", "Reviews"].includes(text)) {
+          const product = this.extractProductContext(target);
+          this.send("product", "tab_view", {
+            tab_name: text,
+            ...product,
+          });
+          return;
+        }
+      }
+
+      // --- Sort/Filter ---
+      const sortEl = target.closest("[data-sort], select") as HTMLSelectElement | null;
+      if (sortEl && sortEl.tagName === "SELECT") {
+        this.send("navigation", "sort_change", {
+          sort_value: sortEl.value || sortEl.textContent?.trim(),
+        });
+        return;
+      }
+
+      // --- Cart icon ---
+      if (target.closest("#cart-count, .cart-icon, [data-cart]")) {
+        this.send("cart", "cart_icon_click", {
+          cart_count: document.getElementById("cart-count")?.textContent?.trim() || "0",
+        });
+        return;
+      }
+
+      // --- Generic interactive click (last resort) ---
+      const interactive = target.closest("a, button") as HTMLElement | null;
+      if (interactive) {
+        const product = this.extractProductContext(target);
+        const label = this.getElementLabel(interactive);
+        if (label.length <= 1 && !product) return;
+        this.send("engagement", "click", {
+          element: interactive.tagName,
+          text: label,
+          ...product,
+        });
+      }
+    });
+  }
+
+  // ── Search ───────────────────────────────────────────────────
+
+  private trackSearch(): void {
+    const searchInput = document.getElementById("store-search") as HTMLInputElement | null;
+    if (!searchInput) return;
+
+    let debounce: number | null = null;
+    searchInput.addEventListener("input", () => {
+      if (debounce) clearTimeout(debounce);
+      debounce = window.setTimeout(() => {
+        const query = searchInput.value.trim();
+        if (query.length >= 2) {
+          this.send("search", "search_query", {
+            query,
+            query_length: query.length,
+          });
+        }
+      }, 800);
+    });
+  }
+
+  // ── Scroll Depth ─────────────────────────────────────────────
+
   private trackScrollDepth(): void {
     const handler = () => {
       const docHeight = Math.max(
         document.body.scrollHeight,
-        document.documentElement.scrollHeight
+        document.documentElement.scrollHeight,
       );
       const scrolled = window.scrollY + window.innerHeight;
       const depth = Math.round((scrolled / docHeight) * 100);
       this.scrollDepth = Math.max(this.scrollDepth, depth);
 
-      // F015: Scrolled entire page without clicking
+      for (const m of [25, 50, 75]) {
+        if (depth >= m && !this.scrollMilestones.has(m)) {
+          this.scrollMilestones.add(m);
+          this.send("navigation", "scroll_depth", { depth_pct: m });
+        }
+      }
+
       if (depth >= 95) {
         const clicks = parseInt(sessionStorage.getItem("sa_click_count") || "0");
         if (clicks === 0) {
-          this.emit("F015", "navigation", { scroll_depth: depth, click_count: 0 });
+          this.send("navigation", "scroll_without_click", { scroll_depth: depth, click_count: 0 }, "F015");
         }
       }
     };
     window.addEventListener("scroll", handler, { passive: true });
   }
 
-  // --- Rage Clicks ---
+  // ── Rage Clicks ──────────────────────────────────────────────
+
   private trackRageClicks(): void {
     document.addEventListener("click", (e) => {
       const now = Date.now();
@@ -74,12 +367,14 @@ export class BehaviorCollector {
       if (now - this.rageClickTracker.lastTime < 500 && dx < 30 && dy < 30) {
         this.rageClickTracker.count++;
         if (this.rageClickTracker.count >= 3) {
-          this.emit("F400", "technical", {
-            rage_click: true,
-            target: (e.target as HTMLElement)?.tagName,
-            target_class: (e.target as HTMLElement)?.className,
+          const target = e.target as HTMLElement;
+          const product = this.extractProductContext(target);
+          this.send("technical", "rage_click", {
+            target_element: target.tagName,
+            target_text: target.textContent?.trim().slice(0, 50),
             click_count: this.rageClickTracker.count,
-          });
+            ...product,
+          }, "F400");
           this.rageClickTracker.count = 0;
         }
       } else {
@@ -90,58 +385,35 @@ export class BehaviorCollector {
       this.rageClickTracker.lastX = e.clientX;
       this.rageClickTracker.lastY = e.clientY;
 
-      // Track total clicks for other detectors
       const count = parseInt(sessionStorage.getItem("sa_click_count") || "0");
       sessionStorage.setItem("sa_click_count", String(count + 1));
     });
   }
 
-  // --- Dead Clicks ---
-  private trackDeadClicks(): void {
-    document.addEventListener("click", (e) => {
-      const target = e.target as HTMLElement;
-      const isInteractive =
-        target.tagName === "A" ||
-        target.tagName === "BUTTON" ||
-        target.tagName === "INPUT" ||
-        target.tagName === "SELECT" ||
-        target.closest("a") ||
-        target.closest("button") ||
-        target.getAttribute("role") === "button" ||
-        window.getComputedStyle(target).cursor === "pointer";
+  // ── Hover Intent ─────────────────────────────────────────────
 
-      if (!isInteractive && target.tagName === "IMG") {
-        this.emit("F023", "navigation", {
-          dead_click: true,
-          element: target.tagName,
-          element_class: target.className,
-        });
-      }
-    });
-  }
-
-  // --- Hover Intent (ATC button hover without click) ---
   private trackHoverIntent(): void {
     let hoverTimer: number | null = null;
 
     document.addEventListener("mouseover", (e) => {
       const target = e.target as HTMLElement;
       const isATC =
-        target.closest("[data-action='add-to-cart']") ||
-        target.closest(".add-to-cart") ||
-        target.textContent?.toLowerCase().includes("add to cart");
+        target.closest("[data-action='add-to-cart']")
+        || target.closest(".add-to-cart")
+        || target.textContent?.toLowerCase().includes("add to cart");
 
       if (isATC) {
         hoverTimer = window.setTimeout(() => {
-          this.emit("F058", "product", {
-            hover_atc_button: true,
+          const product = this.extractProductContext(target);
+          this.send("product", "hover_add_to_cart", {
             hover_duration_ms: 3000,
-          });
+            ...product,
+          }, "F058");
         }, 3000);
       }
     });
 
-    document.addEventListener("mouseout", (_e) => {
+    document.addEventListener("mouseout", () => {
       if (hoverTimer) {
         clearTimeout(hoverTimer);
         hoverTimer = null;
@@ -149,21 +421,21 @@ export class BehaviorCollector {
     });
   }
 
-  // --- Form Friction ---
+  // ── Form Friction ────────────────────────────────────────────
+
   private trackFormFriction(): void {
     let fieldErrorCount = 0;
 
     document.addEventListener("invalid", (e) => {
       fieldErrorCount++;
       if (fieldErrorCount >= 2) {
-        this.emit("F091", "checkout", {
-          form_error_count: fieldErrorCount,
+        this.send("checkout", "form_validation_error", {
+          error_count: fieldErrorCount,
           field_name: (e.target as HTMLInputElement)?.name,
-        });
+        }, "F091");
       }
     }, true);
 
-    // Track time to fill form fields
     document.addEventListener("focusin", (e) => {
       const target = e.target as HTMLInputElement;
       if (target.tagName === "INPUT" && target.type !== "hidden") {
@@ -174,52 +446,45 @@ export class BehaviorCollector {
     document.addEventListener("focusout", (e) => {
       const target = e.target as HTMLInputElement;
       if (target.dataset.saFocusTime) {
-        const focusTime = parseInt(target.dataset.saFocusTime);
-        const duration = Date.now() - focusTime;
-        // F094: Pauses at payment field
+        const duration = Date.now() - parseInt(target.dataset.saFocusTime);
         if (duration > 30000 && (target.name?.includes("card") || target.name?.includes("payment"))) {
-          this.emit("F094", "checkout", {
-            payment_field_focus_time: duration,
+          this.send("checkout", "payment_hesitation", {
             field_name: target.name,
-          });
+            hesitation_ms: duration,
+          }, "F094");
         }
       }
     });
   }
 
-  // --- Copy Events (price comparison behavior) ---
+  // ── Copy Events ──────────────────────────────────────────────
+
   private trackCopyEvents(): void {
     document.addEventListener("copy", () => {
       const selection = window.getSelection()?.toString() || "";
-      const pricePattern = /\$[\d,.]+/;
-      if (pricePattern.test(selection)) {
-        this.emit("F060", "product", {
-          copy_event: true,
-          copied_content_type: "price",
-        });
+      if (/\$[\d,.]+/.test(selection)) {
+        this.send("product", "copy_price", { copied_text: selection.slice(0, 50) }, "F060");
+      } else if (selection.length > 3) {
+        this.send("engagement", "copy_text", { copied_text: selection.slice(0, 80) });
       }
     });
   }
 
-  // --- Exit Intent ---
+  // ── Exit Intent ──────────────────────────────────────────────
+
   private trackExitIntent(): void {
     document.addEventListener("mouseout", (e) => {
-      if (
-        (e as MouseEvent).clientY <= 0 &&
-        (e as MouseEvent).relatedTarget === null
-      ) {
+      if ((e as MouseEvent).clientY <= 0 && (e as MouseEvent).relatedTarget === null) {
         const cartValue = parseFloat(sessionStorage.getItem("sa_cart_value") || "0");
         if (cartValue > 0) {
-          this.emit("F068", "cart", {
-            exit_intent: true,
-            cart_value: cartValue,
-          });
+          this.send("cart", "exit_intent_with_cart", { cart_value: cartValue }, "F068");
         }
       }
     });
   }
 
-  // --- Idle Time ---
+  // ── Idle Time ────────────────────────────────────────────────
+
   private trackIdleTime(): void {
     let idleTimer: number;
     const resetIdle = () => {
@@ -227,41 +492,35 @@ export class BehaviorCollector {
       idleTimer = window.setTimeout(() => {
         const cartItems = parseInt(sessionStorage.getItem("sa_cart_items") || "0");
         if (cartItems > 0) {
-          this.emit("F069", "cart", {
-            idle_duration_ms: 300000,
-            cart_item_count: cartItems,
-          });
+          this.send("cart", "idle_with_cart", { idle_ms: 300000, cart_items: cartItems }, "F069");
         }
-      }, 300000); // 5 min idle
+      }, 300000);
     };
-
     ["mousemove", "keydown", "scroll", "touchstart"].forEach((evt) => {
       document.addEventListener(evt, resetIdle, { passive: true });
     });
     resetIdle();
   }
 
-  // --- Page Visibility (tab switch) ---
+  // ── Page Visibility ──────────────────────────────────────────
+
   private trackPageVisibility(): void {
     let hiddenAt: number | null = null;
-
     document.addEventListener("visibilitychange", () => {
       if (document.hidden) {
         hiddenAt = Date.now();
       } else if (hiddenAt) {
-        const awayDuration = Date.now() - hiddenAt;
-        if (awayDuration > 60000) { // away > 1 min
-          this.emit("F230_custom", "re_engagement", {
-            away_duration_ms: awayDuration,
-            returned: true,
-          });
+        const away = Date.now() - hiddenAt;
+        if (away > 60000) {
+          this.send("engagement", "tab_return", { away_duration_ms: away });
         }
         hiddenAt = null;
       }
     });
   }
 
-  // --- Utility ---
+  // ── Utility ──────────────────────────────────────────────────
+
   private detectPageType(): string {
     const path = window.location.pathname.toLowerCase();
     if (path === "/" || path === "/home") return "landing";

@@ -1,0 +1,7 @@
+{
+  "name": "@ava/store",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "description": "AVA demo store — static HTML served by scripts/serve-store.mjs on port 3001"
+}

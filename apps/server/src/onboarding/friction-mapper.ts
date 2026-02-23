@@ -35,13 +35,32 @@ export async function mapFrictionsForRun(input: {
   const catalog = getFrictionCatalog();
   await FrictionMappingRepo.deleteFrictionMappingsBySite(input.siteConfigId);
   const siteFunctions = buildSiteFunctionContext(input.trackingHooks);
-  const fallbackFunction = firstAvailableFunction(siteFunctions) ?? "navigation";
 
-  const rows = catalog.map((friction) => {
+  const rows: Array<{
+    analyzerRunId: string;
+    siteConfigId: string;
+    frictionId: string;
+    detectorType: string;
+    triggerEvent: string;
+    selector: string | undefined;
+    thresholdConfig: string;
+    confidence: number;
+    evidence: string;
+    isVerified: boolean;
+    isActive: boolean;
+  }> = [];
+
+  for (const friction of catalog) {
     const signalText = `${friction.scenario} ${friction.detection_signal}`.toLowerCase();
     const { candidates, keywordHits } = pickFunctionCandidates(signalText);
-    const mappedFunction =
-      candidates.find((fn) => siteFunctions[fn].available) ?? fallbackFunction;
+
+    // Skip frictions with no keyword relevance to this site
+    if (keywordHits === 0) continue;
+
+    // Only map to functions that are actually available on the site
+    const mappedFunction = candidates.find((fn) => siteFunctions[fn].available);
+    if (!mappedFunction) continue;
+
     const context = siteFunctions[mappedFunction];
     const selector = context.selectors[0];
 
@@ -52,16 +71,11 @@ export async function mapFrictionsForRun(input: {
       friction.detection_signal.includes("AND") ||
       friction.detection_signal.includes("OR");
 
-    const detectorType = ruleLikeSignal
-      ? "rule"
-      : context.available
-        ? "hybrid"
-        : "llm";
+    const detectorType = ruleLikeSignal ? "rule" : "hybrid";
 
-    let confidence = context.available ? 0.7 : 0.48;
+    let confidence = 0.7;
     confidence += Math.min(0.16, keywordHits * 0.02);
     confidence += (friction.severity - 50) / 250;
-    if (!selector) confidence -= 0.1;
     confidence = clamp(confidence, 0.2, 0.95);
 
     const thresholdConfig = JSON.stringify({
@@ -79,7 +93,7 @@ export async function mapFrictionsForRun(input: {
       selectorFound: Boolean(selector),
     });
 
-    return {
+    rows.push({
       analyzerRunId: input.analyzerRunId,
       siteConfigId: input.siteConfigId,
       frictionId: friction.id,
@@ -91,8 +105,8 @@ export async function mapFrictionsForRun(input: {
       evidence,
       isVerified: confidence >= 0.75,
       isActive: true,
-    };
-  });
+    });
+  }
 
   const insertResult = await FrictionMappingRepo.createFrictionMappings(rows);
   const avgConfidence =
@@ -186,39 +200,34 @@ function pickFunctionCandidates(text: string): {
   candidates: SiteFunction[];
   keywordHits: number;
 } {
+  // Use specific, high-signal keywords — avoid generic words like "product",
+  // "image", "description", "order", "form", "scroll" that appear everywhere.
   const functions: Array<{ fn: SiteFunction; score: number }> = [
     {
       fn: "add_to_cart",
-      score: keywordScore(text, ["add to cart", "atc", "buy", "wishlist"]),
+      score: keywordScore(text, ["add to cart", "atc", "buy button", "wishlist", "add to bag"]),
     },
     {
       fn: "cart",
-      score: keywordScore(text, ["cart", "basket", "bag"]),
+      score: keywordScore(text, ["cart", "basket", "bag item", "mini-cart"]),
     },
     {
       fn: "search",
-      score: keywordScore(text, ["search", "query", "results", "autocomplete"]),
+      score: keywordScore(text, ["search", "autocomplete", "search result"]),
     },
     {
       fn: "checkout",
-      score: keywordScore(text, [
-        "checkout",
-        "payment",
-        "billing",
-        "shipping",
-        "order",
-        "form",
-      ]),
+      score: keywordScore(text, ["checkout", "payment", "billing", "place order"]),
     },
     {
       fn: "product",
       score: keywordScore(text, [
-        "product",
+        "product page",
+        "product detail",
         "pdp",
         "variant",
+        "size guide",
         "stock",
-        "image",
-        "description",
       ]),
     },
     {
@@ -227,33 +236,25 @@ function pickFunctionCandidates(text: string): {
     },
     {
       fn: "pricing",
-      score: keywordScore(text, ["price", "coupon", "discount", "promo", "fee", "tax"]),
+      score: keywordScore(text, ["price compari", "coupon", "promo code", "discount code"]),
     },
     {
       fn: "navigation",
-      score: keywordScore(text, [
-        "navigation",
-        "menu",
-        "scroll",
-        "category",
-        "breadcrumb",
-        "back button",
-      ]),
+      score: keywordScore(text, ["breadcrumb", "menu", "filter", "sort by", "facet"]),
     },
   ];
 
   const ranked = functions
     .filter((item) => item.score > 0)
-    .sort((a, b) => b.score - a.score)
-    .map((item) => item.fn);
+    .sort((a, b) => b.score - a.score);
 
   if (ranked.length === 0) {
-    return { candidates: ["navigation", "product"], keywordHits: 0 };
+    return { candidates: [], keywordHits: 0 };
   }
 
   return {
-    candidates: ranked,
-    keywordHits: functions.reduce((sum, item) => sum + item.score, 0),
+    candidates: ranked.map((item) => item.fn),
+    keywordHits: ranked[0].score,
   };
 }
 

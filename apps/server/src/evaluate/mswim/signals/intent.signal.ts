@@ -2,7 +2,7 @@ import { INTENT_FUNNEL_SCORES, INTENT_BOOSTS } from "@ava/shared";
 
 /**
  * Adjust the LLM's raw intent score using server-side signals.
- * - Funnel position boost (landing=0, checkout=30)
+ * - Funnel position boost (landing=10, checkout=85)
  * - Logged-in + repeat visitor boosts
  * - Cart value boost
  */
@@ -23,14 +23,14 @@ export function adjustIntent(
   score += funnelBonus;
 
   // Logged-in boost
-  if (ctx.isLoggedIn) score += INTENT_BOOSTS.loggedIn;
+  if (ctx.isLoggedIn) score += INTENT_BOOSTS.USER_LOGGED_IN;
 
   // Repeat visitor boost
-  if (ctx.isRepeatVisitor) score += INTENT_BOOSTS.repeatVisitor;
+  if (ctx.isRepeatVisitor) score += INTENT_BOOSTS.REPEAT_CUSTOMER;
 
   // Cart value boost (tiered)
   if (ctx.cartItemCount > 0) {
-    score += INTENT_BOOSTS.hasCart;
+    score += INTENT_BOOSTS.CART_HAS_ITEMS;
     if (ctx.cartValue > 100) score += 5;
     if (ctx.cartValue > 250) score += 5;
   }

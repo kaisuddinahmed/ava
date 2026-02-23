@@ -3,6 +3,7 @@ import type { DecisionOutput } from "../evaluate/decision-engine.js";
 import type { EvaluationResult } from "../evaluate/evaluate.service.js";
 import { getAction } from "./action-registry.js";
 import { buildPayload } from "./payload-builder.js";
+import { captureTrainingDatapoint } from "../training/training-collector.service.js";
 
 export interface InterventionOutput {
   interventionId: string;
@@ -93,6 +94,11 @@ export async function recordInterventionOutcome(
   } else if (status === "converted") {
     await SessionRepo.incrementConversions(intervention.sessionId);
   }
+
+  // Capture training datapoint on terminal outcomes (non-blocking)
+  captureTrainingDatapoint(interventionId, status).catch((error) => {
+    console.error("[Intervene] Training datapoint capture failed:", error);
+  });
 
   return intervention;
 }

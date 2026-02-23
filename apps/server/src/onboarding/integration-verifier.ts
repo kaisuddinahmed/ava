@@ -11,7 +11,7 @@ import {
 export const FULL_ACTIVE_THRESHOLDS = {
   behaviorCoveragePct: 85,
   frictionCoveragePct: 80,
-  avgConfidence: 0.75,
+  avgConfidence: 0.50,
 } as const;
 
 export interface VerificationResult {

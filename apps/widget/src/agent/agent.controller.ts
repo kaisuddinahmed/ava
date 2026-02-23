@@ -11,7 +11,6 @@ export class AgentController {
   private bridge: FISMBridge;
   private interventionHandler: InterventionHandler;
   private interventionQueue: InterventionPayload[] = [];
-  private activeIntervention: InterventionPayload | null = null;
   private isProcessing = false;
   private cooldownUntil = 0;
 
@@ -83,7 +82,6 @@ export class AgentController {
 
   private processIntervention(payload: InterventionPayload): void {
     this.isProcessing = true;
-    this.activeIntervention = payload;
     this.interventionCount++;
 
     // Set cooldown
@@ -103,7 +101,6 @@ export class AgentController {
     // Allow next intervention after a short delay
     setTimeout(() => {
       this.isProcessing = false;
-      this.activeIntervention = null;
       this.processNextInQueue();
     }, 1000);
   }
@@ -172,6 +169,5 @@ export class AgentController {
 
   destroy(): void {
     this.interventionQueue = [];
-    this.activeIntervention = null;
   }
 }

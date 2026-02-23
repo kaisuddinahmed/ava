@@ -8,6 +8,7 @@ export * from "./types/intervention.js";
 export * from "./types/session.js";
 export * from "./types/widget.js";
 export * from "./types/mswim.js";
+export * from "./types/continuous-learning.js";
 
 // Constants
 export * from "./constants/friction-catalog.js";

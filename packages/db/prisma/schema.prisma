@@ -35,9 +35,26 @@ model Session {
   totalConversions        Int     @default(0)
   suppressNonPassive      Boolean @default(false)
 
+  // Analytics fields (Phase 1 — all nullable for safe migration)
+  endedAt           DateTime?
+  totalPageViews    Int       @default(0)
+  totalTimeOnSiteMs Int?
+  entryPage         String?
+  exitPage          String?
+  landingReferrer   String?
+  utmSource         String?
+  utmMedium         String?
+  utmCampaign       String?
+  utmContent        String?
+  utmTerm           String?
+
   events        TrackEvent[]
   evaluations   Evaluation[]
   interventions Intervention[]
+
+  @@index([visitorId, siteUrl, startedAt])
+  @@index([referrerType, startedAt])
+  @@index([siteUrl, startedAt])
 }
 
 // ---------------------------------------------------------------------------
@@ -56,8 +73,18 @@ model TrackEvent {
   rawSignals String  // JSON blob
   metadata  String?
 
+  // Analytics fields — promoted from rawSignals/page_context (all nullable)
+  previousPageUrl       String?
+  timeOnPageMs          Int?
+  scrollDepthPct        Int?
+  sessionSequenceNumber Int?
+  siteUrl               String?  // denormalized from Session for direct filtering
+
   @@index([sessionId, timestamp])
   @@index([frictionId])
+  @@index([siteUrl, pageType, timestamp])
+  @@index([sessionId, eventType])
+  @@index([pageUrl, timestamp])
 }
 
 // ---------------------------------------------------------------------------
@@ -266,6 +293,77 @@ model FrictionMapping {
 }
 
 // ---------------------------------------------------------------------------
+// TrainingDatapoint — denormalized snapshot for LLM fine-tuning export
+// Joins Evaluation + Intervention outcome + Session context into one row.
+// Created after an intervention reaches a terminal outcome.
+// ---------------------------------------------------------------------------
+model TrainingDatapoint {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+
+  // Source references
+  sessionId      String
+  evaluationId   String
+  interventionId String   @unique
+
+  // Session context snapshot
+  siteUrl         String
+  deviceType      String  // mobile | tablet | desktop
+  referrerType    String  // direct | organic | paid | social | email | referral
+  isLoggedIn      Boolean
+  isRepeatVisitor Boolean
+  cartValue       Float
+  cartItemCount   Int
+  sessionAgeSec   Int     // seconds from session start to evaluation
+  totalInterventionsFired Int
+  totalDismissals         Int
+  totalConversions        Int
+
+  // LLM input: raw signals that fed the evaluation
+  eventBatchIds  String   // JSON array of TrackEvent IDs
+  rawEventData   String   // JSON: condensed event batch (category, eventType, frictionId, rawSignals)
+  pageType       String   // page type at evaluation time
+
+  // LLM output
+  narrative      String   // LLM prose reasoning
+  frictionsFound String   // JSON array of friction_ids
+
+  // MSWIM scores
+  intentScore      Float
+  frictionScore    Float
+  clarityScore     Float
+  receptivityScore Float
+  valueScore       Float
+  compositeScore   Float
+  weightsUsed      String  // JSON weight profile snapshot
+  tier             String  // MONITOR | PASSIVE | NUDGE | ACTIVE | ESCALATE
+  decision         String  // fire | suppress | queue
+  gateOverride     String? // which gate triggered, null if none
+
+  // Intervention details
+  interventionType String  // passive | nudge | active | escalate
+  actionCode       String
+  frictionId       String
+  mswimScoreAtFire Float
+  tierAtFire       String
+
+  // Outcome label — the training target
+  outcome          String  // delivered | dismissed | converted | ignored
+  conversionAction String?
+  outcomeDelayMs   Int?    // ms between intervention fire and outcome
+
+  // Quality & filtering
+  qualityFlags String? // JSON: { hasOutcome, highConfidence, sufficientContext, ... }
+
+  @@index([outcome])
+  @@index([tier, outcome])
+  @@index([siteUrl, createdAt])
+  @@index([frictionId, outcome])
+  @@index([interventionType, outcome])
+  @@index([createdAt])
+}
+
+// ---------------------------------------------------------------------------
 // IntegrationStatus — progress log for onboarding + activation mode
 // ---------------------------------------------------------------------------
 model IntegrationStatus {
@@ -282,4 +380,222 @@ model IntegrationStatus {
 
   @@index([siteConfigId, status])
   @@index([analyzerRunId, status])
+}
+
+// ---------------------------------------------------------------------------
+// ShadowComparison — dual-path evaluation comparison (LLM+MSWIM vs MSWIM-no-LLM)
+// ---------------------------------------------------------------------------
+model ShadowComparison {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+
+  sessionId    String
+  evaluationId String
+
+  // Production path (LLM+MSWIM)
+  prodIntentScore      Float
+  prodFrictionScore    Float
+  prodClarityScore     Float
+  prodReceptivityScore Float
+  prodValueScore       Float
+  prodCompositeScore   Float
+  prodTier             String
+  prodDecision         String
+  prodGateOverride     String?
+
+  // Shadow path (MSWIM-no-LLM)
+  shadowIntentScore      Float
+  shadowFrictionScore    Float
+  shadowClarityScore     Float
+  shadowReceptivityScore Float
+  shadowValueScore       Float
+  shadowCompositeScore   Float
+  shadowTier             String
+  shadowDecision         String
+  shadowGateOverride     String?
+
+  // Divergence metrics
+  compositeDivergence Float
+  tierMatch           Boolean
+  decisionMatch       Boolean
+  gateOverrideMatch   Boolean
+
+  // Context snapshot
+  pageType   String
+  eventCount Int
+  cartValue  Float
+
+  // Debug: synthetic hints fed to shadow runMSWIM
+  syntheticHints String // JSON
+
+  @@index([sessionId, createdAt])
+  @@index([tierMatch, createdAt])
+  @@index([decisionMatch, createdAt])
+  @@index([compositeDivergence])
+  @@index([evaluationId])
+}
+
+// ---------------------------------------------------------------------------
+// JobRun — tracks scheduled and manual job executions
+// ---------------------------------------------------------------------------
+model JobRun {
+  id           String    @id @default(uuid())
+  jobName      String    // nightly_batch | drift_check | rollout_health | hourly_snapshot
+  status       String    @default("running") // running | completed | failed
+  startedAt    DateTime  @default(now())
+  completedAt  DateTime?
+  triggeredBy  String    @default("scheduler") // scheduler | api | manual
+  summary      String?   // JSON: per-subtask results
+  errorMessage String?
+  durationMs   Int?
+
+  @@index([jobName, startedAt])
+  @@index([status])
+}
+
+// ---------------------------------------------------------------------------
+// DriftSnapshot — periodic metric snapshots for trend analysis
+// ---------------------------------------------------------------------------
+model DriftSnapshot {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+  siteUrl   String?  // null = global
+  windowType String  // 1h | 6h | 24h | 7d
+
+  // Shadow comparison agreement rates
+  tierAgreementRate      Float
+  decisionAgreementRate  Float
+  avgCompositeDivergence Float
+  sampleCount            Int
+
+  // Signal calibration (avg by outcome)
+  avgIntentConverted       Float?
+  avgIntentDismissed       Float?
+  avgFrictionConverted     Float?
+  avgFrictionDismissed     Float?
+  avgClarityConverted      Float?
+  avgClarityDismissed      Float?
+  avgReceptivityConverted  Float?
+  avgReceptivityDismissed  Float?
+  avgValueConverted        Float?
+  avgValueDismissed        Float?
+  avgCompositeConverted    Float?
+  avgCompositeDismissed    Float?
+
+  // Outcome rates in the window
+  conversionRate Float?
+  dismissalRate  Float?
+
+  @@index([siteUrl, windowType, createdAt])
+  @@index([createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// DriftAlert — detected scoring/model anomalies
+// ---------------------------------------------------------------------------
+model DriftAlert {
+  id             String    @id @default(uuid())
+  createdAt      DateTime  @default(now())
+  siteUrl        String?   // null = global
+  alertType      String    // tier_agreement_drop | decision_agreement_drop | divergence_spike | signal_shift | conversion_drop
+  severity       String    // warning | critical
+  windowType     String    // which window triggered it
+  metric         String    // e.g. tierAgreementRate
+  expected       Float     // baseline/threshold
+  actual         Float     // observed
+  message        String    // human-readable description
+  acknowledged   Boolean   @default(false)
+  acknowledgedAt DateTime?
+  resolvedAt     DateTime?
+
+  @@index([siteUrl, alertType, createdAt])
+  @@index([acknowledged, createdAt])
+  @@index([severity, createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// Experiment — A/B test definition with variants
+// ---------------------------------------------------------------------------
+model Experiment {
+  id             String    @id @default(uuid())
+  name           String
+  description    String?
+  status         String    @default("draft") // draft | running | paused | completed | cancelled
+  siteUrl        String?   // null = all sites
+
+  // Traffic allocation
+  trafficPercent Int       @default(100) // % of total traffic enrolled
+  variants       String    // JSON array: [{ id, name, weight, scoringConfigId?, evalEngine? }]
+
+  // Metrics config
+  primaryMetric  String    @default("conversion_rate") // conversion_rate | dismissal_rate | composite_score
+  minSampleSize  Int       @default(100) // per variant
+
+  startedAt  DateTime?
+  endedAt    DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  assignments ExperimentAssignment[]
+  rollout     Rollout?
+
+  @@index([status])
+  @@index([siteUrl, status])
+}
+
+// ---------------------------------------------------------------------------
+// ExperimentAssignment — session → variant mapping
+// ---------------------------------------------------------------------------
+model ExperimentAssignment {
+  id           String     @id @default(uuid())
+  experimentId String
+  experiment   Experiment @relation(fields: [experimentId], references: [id])
+  sessionId    String
+  variantId    String     // which variant this session was assigned to
+  assignedAt   DateTime   @default(now())
+
+  @@unique([experimentId, sessionId])
+  @@index([experimentId, variantId])
+  @@index([sessionId])
+}
+
+// ---------------------------------------------------------------------------
+// Rollout — staged config change with health checks
+// ---------------------------------------------------------------------------
+model Rollout {
+  id            String    @id @default(uuid())
+  name          String
+  status        String    @default("pending") // pending | rolling | paused | completed | rolled_back
+  siteUrl       String?
+
+  // What is being rolled out
+  changeType    String    // scoring_config | eval_engine | gate_thresholds
+  newConfigId   String?   // ScoringConfig ID for the new config
+  newEvalEngine String?   // llm | fast | auto
+  configPayload String?   // JSON: arbitrary config overrides
+
+  // Staged rollout definition
+  stages        String    // JSON array: [{ percent, durationHours, healthChecks }]
+  currentStage  Int       @default(0)
+
+  // Health criteria (JSON)
+  healthCriteria String   // JSON: { minConversionRate, maxDismissalRate, maxDivergence, ... }
+
+  // Linked experiment (rollout creates an experiment for traffic splitting)
+  experimentId   String?  @unique
+  experiment     Experiment? @relation(fields: [experimentId], references: [id])
+
+  // Lifecycle
+  startedAt        DateTime?
+  completedAt      DateTime?
+  rolledBackAt     DateTime?
+  rollbackReason   String?
+  lastHealthCheck  DateTime?
+  lastHealthStatus String?   // healthy | degraded | unhealthy
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@index([siteUrl, status])
 }

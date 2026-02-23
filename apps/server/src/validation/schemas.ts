@@ -169,6 +169,67 @@ export const IntegrationVerifySchema = z.object({
 });
 
 // ============================================================================
+// API: EXPERIMENTS
+// ============================================================================
+
+const ExperimentVariantSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  weight: z.number().min(0).max(1),
+  scoringConfigId: z.string().optional(),
+  evalEngine: z.enum(["llm", "fast", "auto"]).optional(),
+});
+
+export const ExperimentCreateSchema = z.object({
+  name: z.string().min(1).max(200),
+  description: z.string().max(2000).optional(),
+  siteUrl: z.string().optional().nullable(),
+  trafficPercent: z.number().int().min(1).max(100).optional().default(100),
+  variants: z.array(ExperimentVariantSchema).min(2).max(10),
+  primaryMetric: z
+    .enum(["conversion_rate", "dismissal_rate", "composite_score"])
+    .optional()
+    .default("conversion_rate"),
+  minSampleSize: z.number().int().min(10).max(100000).optional().default(100),
+});
+
+// ============================================================================
+// API: ROLLOUTS
+// ============================================================================
+
+const RolloutHealthCriteriaSchema = z.object({
+  minConversionRate: z.number().min(0).max(1).optional(),
+  maxDismissalRate: z.number().min(0).max(1).optional(),
+  maxDivergence: z.number().min(0).max(100).optional(),
+  minSampleSize: z.number().int().min(1).optional(),
+});
+
+const RolloutStageSchema = z.object({
+  percent: z.number().int().min(1).max(100),
+  durationHours: z.number().min(1).max(720),
+  healthChecks: RolloutHealthCriteriaSchema,
+});
+
+export const RolloutCreateSchema = z.object({
+  name: z.string().min(1).max(200),
+  siteUrl: z.string().optional().nullable(),
+  changeType: z.enum(["scoring_config", "eval_engine", "gate_thresholds"]),
+  newConfigId: z.string().optional(),
+  newEvalEngine: z.enum(["llm", "fast", "auto"]).optional(),
+  configPayload: z.string().optional(),
+  stages: z.array(RolloutStageSchema).min(1).max(10),
+  healthCriteria: RolloutHealthCriteriaSchema,
+});
+
+// ============================================================================
+// API: JOBS
+// ============================================================================
+
+export const JobTriggerSchema = z.object({
+  job: z.enum(["nightly_batch", "drift_check", "rollout_health"]),
+});
+
+// ============================================================================
 // UTILITY
 // ============================================================================
 

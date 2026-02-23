@@ -9,10 +9,7 @@ export class WidgetShell {
   private hostEl: HTMLDivElement;
   private shadow: ShadowRoot;
   private root: HTMLDivElement;
-  private config: WidgetConfig;
-
   constructor(config: WidgetConfig) {
-    this.config = config;
 
     // Create host element
     this.hostEl = document.createElement("div");

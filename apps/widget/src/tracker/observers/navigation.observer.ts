@@ -10,20 +10,30 @@ export class NavigationObserver {
   private pageLoadTime = Date.now();
   private pageViews = 0;
   private backCount = 0;
+  private previousUrl: string = "";
   private exitHandler: ((e: MouseEvent) => void) | null = null;
   private popStateHandler: (() => void) | null = null;
   private beforeUnloadHandler: ((e: BeforeUnloadEvent) => void) | null = null;
-  private pageViewEmitted = false;
 
   constructor(bridge: FISMBridge) {
     this.bridge = bridge;
+  }
+
+  private getUtmParams(): Record<string, string> {
+    const params = new URLSearchParams(window.location.search);
+    const utms: Record<string, string> = {};
+    for (const key of ["utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term"]) {
+      const val = params.get(key);
+      if (val) utms[key] = val;
+    }
+    return utms;
   }
 
   start(): void {
     this.pageLoadTime = Date.now();
     this.pageViews++;
 
-    // Emit page view
+    // Emit page view with previous_page_url + UTM params
     this.bridge.send("behavioral_event", {
       event_id: this.uid(),
       friction_id: null,
@@ -34,10 +44,14 @@ export class NavigationObserver {
         page_title: document.title,
         referrer: document.referrer,
         page_view_count: this.pageViews,
+        previous_page_url: this.previousUrl || document.referrer || "",
+        ...this.getUtmParams(),
       },
       timestamp: Date.now(),
     });
-    this.pageViewEmitted = true;
+
+    // Track current URL as previous for next navigation
+    this.previousUrl = window.location.href;
 
     // Quick bounce detection — leaving within 10 seconds
     setTimeout(() => {
@@ -96,7 +110,8 @@ export class NavigationObserver {
         });
       }
 
-      // Reset page load time for new page
+      // Track URL transition and reset page load time for new page
+      this.previousUrl = window.location.href;
       this.pageLoadTime = Date.now();
     };
     window.addEventListener("popstate", this.popStateHandler);

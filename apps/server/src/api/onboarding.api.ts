@@ -57,10 +57,14 @@ export async function getOnboardingStatus(req: Request, res: Response) {
       latestStatus,
       behaviorMapped,
       frictionMapped,
+      highConfidenceBehavior,
+      highConfidenceFriction,
     ] = await Promise.all([
       IntegrationStatusRepo.getLatestIntegrationStatusByRun(runId),
       BehaviorMappingRepo.countDistinctBehaviorPatterns(run.siteConfigId, run.id),
       FrictionMappingRepo.countDistinctFrictions(run.siteConfigId, run.id),
+      BehaviorMappingRepo.countHighConfidenceBehaviors(run.siteConfigId, run.id),
+      FrictionMappingRepo.countHighConfidenceFrictions(run.siteConfigId, run.id),
     ]);
 
     res.json({
@@ -87,6 +91,8 @@ export async function getOnboardingStatus(req: Request, res: Response) {
         behaviorTarget: TOTAL_BEHAVIOR_PATTERNS,
         frictionMapped,
         frictionTarget: TOTAL_FRICTION_SCENARIOS,
+        highConfidenceBehavior,
+        highConfidenceFriction,
       },
       latestStatus,
     });

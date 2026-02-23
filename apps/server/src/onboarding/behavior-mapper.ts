@@ -35,22 +35,40 @@ export async function mapBehaviorsForRun(input: {
   const catalog = await getBehaviorCatalog();
   await BehaviorMappingRepo.deleteBehaviorMappingsBySite(input.siteConfigId);
   const siteFunctions = buildSiteFunctionContext(input.trackingHooks);
-  const fallbackFunction = firstAvailableFunction(siteFunctions) ?? "navigation";
 
-  const rows = catalog.map((pattern) => {
+  const rows: Array<{
+    analyzerRunId: string;
+    siteConfigId: string;
+    patternId: string;
+    patternName: string;
+    mappedFunction: string;
+    eventType: string;
+    selector: string | undefined;
+    confidence: number;
+    source: string;
+    evidence: string;
+    isVerified: boolean;
+    isActive: boolean;
+  }> = [];
+
+  for (const pattern of catalog) {
     const { candidates, keywordHits } = pickFunctionCandidates(pattern.description);
-    const mappedFunction =
-      candidates.find((fn) => siteFunctions[fn].available) ?? fallbackFunction;
+
+    // Skip patterns with no keyword relevance to this site
+    if (keywordHits === 0) continue;
+
+    // Only map to functions that are actually available on the site
+    const mappedFunction = candidates.find((fn) => siteFunctions[fn].available);
+    if (!mappedFunction) continue;
+
     const context = siteFunctions[mappedFunction];
     const selector = context.selectors[0];
 
-    let confidence = context.available ? 0.72 : 0.42;
+    let confidence = 0.72;
     confidence += Math.min(0.18, keywordHits * 0.03);
-    if (!context.available) confidence -= 0.08;
-    if (mappedFunction === fallbackFunction && keywordHits === 0) confidence -= 0.08;
     confidence = clamp(confidence, 0.2, 0.95);
 
-    const source = context.available ? "dom_rule" : "llm_inferred";
+    const source = "dom_rule";
     const evidence = JSON.stringify({
       platform: input.platform,
       category: pattern.category,
@@ -60,7 +78,7 @@ export async function mapBehaviorsForRun(input: {
       selectorFound: Boolean(selector),
     });
 
-    return {
+    rows.push({
       analyzerRunId: input.analyzerRunId,
       siteConfigId: input.siteConfigId,
       patternId: pattern.id,
@@ -73,8 +91,8 @@ export async function mapBehaviorsForRun(input: {
       evidence,
       isVerified: confidence >= 0.75,
       isActive: true,
-    };
-  });
+    });
+  }
 
   const insertResult = await BehaviorMappingRepo.createBehaviorMappings(rows);
   const avgConfidence =
@@ -169,75 +187,64 @@ function pickFunctionCandidates(description: string): {
   keywordHits: number;
 } {
   const text = description.toLowerCase();
+
+  // Use specific, high-signal keywords — avoid generic words like "product",
+  // "image", "description", "order", "scroll" that appear everywhere.
   const functions: Array<{ fn: SiteFunction; score: number }> = [
     {
       fn: "add_to_cart",
-      score: keywordScore(text, ["add to cart", "atc", "wishlist", "buy now"]),
+      score: keywordScore(text, ["add to cart", "atc", "wishlist", "buy now", "add to bag"]),
     },
     {
       fn: "cart",
-      score: keywordScore(text, ["cart", "basket", "bag"]),
+      score: keywordScore(text, ["cart", "basket", "bag item", "mini-cart"]),
     },
     {
       fn: "search",
-      score: keywordScore(text, ["search", "query", "autocomplete"]),
+      score: keywordScore(text, ["search", "autocomplete", "search result"]),
     },
     {
       fn: "checkout",
-      score: keywordScore(text, [
-        "checkout",
-        "payment",
-        "billing",
-        "shipping",
-        "order",
-      ]),
+      score: keywordScore(text, ["checkout", "payment", "billing", "place order"]),
     },
     {
       fn: "product",
       score: keywordScore(text, [
-        "product",
+        "product page",
+        "product detail",
+        "pdp",
         "variant",
-        "size",
-        "color",
-        "image",
-        "video",
-        "description",
+        "size guide",
+        "size chart",
       ]),
     },
     {
       fn: "reviews",
-      score: keywordScore(text, ["review", "rating", "q&a"]),
+      score: keywordScore(text, ["review", "rating", "testimonial"]),
     },
     {
       fn: "pricing",
-      score: keywordScore(text, ["price", "discount", "coupon", "promo", "deal"]),
+      score: keywordScore(text, ["price compari", "coupon", "promo code", "discount code"]),
     },
     {
       fn: "navigation",
-      score: keywordScore(text, [
-        "navigation",
-        "category",
-        "menu",
-        "scroll",
-        "breadcrumb",
-        "homepage",
-        "landing",
-      ]),
+      score: keywordScore(text, ["breadcrumb", "menu", "filter", "sort by", "facet"]),
     },
   ];
 
+  // Only consider functions with a match
   const ranked = functions
     .filter((item) => item.score > 0)
-    .sort((a, b) => b.score - a.score)
-    .map((item) => item.fn);
+    .sort((a, b) => b.score - a.score);
 
   if (ranked.length === 0) {
-    return { candidates: ["navigation", "product"], keywordHits: 0 };
+    return { candidates: [], keywordHits: 0 };
   }
 
+  // Use the top candidate's score as keywordHits (not sum across all)
   return {
-    candidates: ranked,
-    keywordHits: functions.reduce((sum, item) => sum + item.score, 0),
+    candidates: ranked.map((item) => item.fn),
+    keywordHits: ranked[0].score,
   };
 }
 

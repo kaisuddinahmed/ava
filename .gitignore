@@ -32,3 +32,12 @@ yarn-error.log*
 *.njsproj
 *.sln
 *.sw?
+
+# Turborepo cache
+.turbo
+
+# SQLite dev database
+*.db
+*.db-journal
+*.db-shm
+*.db-wal

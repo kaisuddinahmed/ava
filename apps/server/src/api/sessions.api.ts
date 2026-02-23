@@ -1,9 +1,27 @@
 import type { Request, Response } from "express";
 import { SessionRepo } from "@ava/db";
+import { prisma } from "@ava/db";
 
 export async function listSessions(req: Request, res: Response) {
   try {
     const siteUrl = req.query.siteUrl as string | undefined;
+    const sinceParam = req.query.since as string | undefined;
+
+    // If a "since" timestamp is provided, only return sessions started after it
+    if (sinceParam) {
+      const sinceDate = new Date(sinceParam);
+      const sessions = await prisma.session.findMany({
+        where: {
+          startedAt: { gte: sinceDate },
+          ...(siteUrl ? { siteUrl } : {}),
+        },
+        orderBy: { startedAt: "desc" },
+        take: 50,
+      });
+      res.json({ sessions });
+      return;
+    }
+
     const sessions = siteUrl
       ? await SessionRepo.listActiveSessions(siteUrl)
       : await SessionRepo.getRecentSessions(20);

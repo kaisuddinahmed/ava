@@ -13,8 +13,13 @@ const targets = [
   },
   {
     name: "store",
+    cmd: "node",
+    args: ["scripts/serve-store.mjs"],
+  },
+  {
+    name: "dashboard",
     cmd: npmCmd,
-    args: ["run", "dev", "--workspace=@ava/agent"],
+    args: ["run", "dev", "--workspace=@ava/dashboard"],
   },
   {
     name: "integration",
@@ -26,10 +31,11 @@ const targets = [
 const children = [];
 let shuttingDown = false;
 let readyAnnounced = false;
-const requiredPorts = [8080, 3001, 4002];
+const requiredPorts = [8080, 3001, 3000, 4002];
 const startupPorts = [
   { port: 8080, service: "server" },
   { port: 3001, service: "store" },
+  { port: 3000, service: "dashboard" },
   { port: 4002, service: "integration" },
 ];
 
@@ -73,7 +79,7 @@ const readinessInterval = setInterval(async () => {
 
   if (allUp) {
     readyAnnounced = true;
-    console.log("[dev:demo] Ready -> http://localhost:4002 (wizard), http://localhost:3001 (store), http://localhost:8080/health (server)");
+    console.log("[dev:demo] Ready -> http://localhost:4002 (wizard), http://localhost:3001 (store), http://localhost:3000 (dashboard), http://localhost:8080/health (server)");
     clearInterval(readinessInterval);
     return;
   }
@@ -124,7 +130,7 @@ async function preflight() {
   const detail = occupied.map((entry) => `${entry.port} (${entry.service})`).join(", ");
   console.error(`[dev:demo] Port(s) already in use: ${detail}`);
   console.error(
-    '[dev:demo] Stop old processes first. Example: pkill -f "apps/server/src/index.ts|packages/agent/vite.config.js|apps/demo/vite.config.js"'
+    '[dev:demo] Stop old processes first. Example: pkill -f "apps/server/src/index.ts|scripts/serve-store.mjs|apps/demo/vite.config.js"'
   );
   process.exit(1);
 }

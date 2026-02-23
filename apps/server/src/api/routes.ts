@@ -6,6 +6,12 @@ import * as scoringConfigApi from "./scoring-config.api.js";
 import * as analyticsApi from "./analytics.api.js";
 import * as onboardingApi from "./onboarding.api.js";
 import * as integrationApi from "./integration.api.js";
+import * as trainingApi from "./training.api.js";
+import * as shadowApi from "./shadow.api.js";
+import * as jobsApi from "./jobs.api.js";
+import * as driftApi from "./drift.api.js";
+import * as experimentsApi from "./experiments.api.js";
+import * as rolloutsApi from "./rollouts.api.js";
 
 export const apiRouter = Router();
 
@@ -31,6 +37,14 @@ apiRouter.delete("/scoring-configs/:id", scoringConfigApi.deleteConfig);
 // Analytics
 apiRouter.get("/analytics/overview", analyticsApi.getOverview);
 apiRouter.get("/analytics/session/:sessionId", analyticsApi.getSessionAnalytics);
+apiRouter.get("/analytics/funnel", analyticsApi.getFunnel);
+apiRouter.get("/analytics/flow", analyticsApi.getPageFlow);
+apiRouter.get("/analytics/traffic", analyticsApi.getTrafficSources);
+apiRouter.get("/analytics/devices", analyticsApi.getDevices);
+apiRouter.get("/analytics/pages", analyticsApi.getPageStats);
+apiRouter.get("/analytics/sessions/trend", analyticsApi.getSessionsTrend);
+apiRouter.get("/analytics/retention", analyticsApi.getRetention);
+apiRouter.get("/analytics/clicks", analyticsApi.getClickHeatmap);
 
 // Onboarding
 apiRouter.post("/onboarding/start", onboardingApi.startOnboarding);
@@ -40,3 +54,51 @@ apiRouter.get("/onboarding/:runId/results", onboardingApi.getOnboardingResults);
 // Integration
 apiRouter.post("/integration/:siteId/verify", integrationApi.verifyIntegration);
 apiRouter.post("/integration/:siteId/activate", integrationApi.activateIntegration);
+
+// Training Data Export
+apiRouter.get("/training/stats", trainingApi.getStats);
+apiRouter.get("/training/distribution", trainingApi.getDistribution);
+apiRouter.get("/training/export/jsonl", trainingApi.exportJsonl);
+apiRouter.get("/training/export/csv", trainingApi.exportCsv);
+apiRouter.get("/training/export/json", trainingApi.exportJson);
+apiRouter.get("/training/export/fine-tune", trainingApi.exportFineTune);
+apiRouter.get("/training/export/fine-tune/preview", trainingApi.previewFineTune);
+apiRouter.get("/training/quality/stats", trainingApi.getQuality);
+apiRouter.get("/training/quality/assess", trainingApi.assessDatapoints);
+
+// Shadow Mode Comparisons
+apiRouter.get("/shadow/stats", shadowApi.getStats);
+apiRouter.get("/shadow/comparisons", shadowApi.listComparisons);
+apiRouter.get("/shadow/session/:sessionId", shadowApi.getSessionComparisons);
+apiRouter.get("/shadow/divergences", shadowApi.getTopDivergences);
+
+// Jobs (Scheduled)
+apiRouter.get("/jobs/runs", jobsApi.listJobRuns);
+apiRouter.get("/jobs/runs/:id", jobsApi.getJobRun);
+apiRouter.post("/jobs/trigger", jobsApi.triggerJob);
+apiRouter.get("/jobs/next-run", jobsApi.getNextRun);
+
+// Drift Detection
+apiRouter.get("/drift/status", driftApi.getStatus);
+apiRouter.get("/drift/snapshots", driftApi.listSnapshots);
+apiRouter.get("/drift/alerts", driftApi.listAlerts);
+apiRouter.post("/drift/alerts/:id/ack", driftApi.acknowledgeAlert);
+apiRouter.post("/drift/check", driftApi.triggerDriftCheck);
+
+// Experiments (A/B Testing)
+apiRouter.get("/experiments", experimentsApi.list);
+apiRouter.post("/experiments", experimentsApi.create);
+apiRouter.get("/experiments/:id", experimentsApi.get);
+apiRouter.post("/experiments/:id/start", experimentsApi.start);
+apiRouter.post("/experiments/:id/pause", experimentsApi.pause);
+apiRouter.post("/experiments/:id/end", experimentsApi.end);
+apiRouter.get("/experiments/:id/results", experimentsApi.results);
+
+// Rollouts (Gradual Config Changes)
+apiRouter.get("/rollouts", rolloutsApi.list);
+apiRouter.post("/rollouts", rolloutsApi.create);
+apiRouter.get("/rollouts/:id", rolloutsApi.get);
+apiRouter.post("/rollouts/:id/start", rolloutsApi.start);
+apiRouter.post("/rollouts/:id/promote", rolloutsApi.promote);
+apiRouter.post("/rollouts/:id/rollback", rolloutsApi.rollback);
+apiRouter.post("/rollouts/:id/pause", rolloutsApi.pauseRolloutEndpoint);

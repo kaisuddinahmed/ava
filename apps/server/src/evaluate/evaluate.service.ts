@@ -4,6 +4,12 @@ import { evaluateWithLLM } from "./analyst.js";
 import { runMSWIM, type SessionContext } from "./mswim/mswim.engine.js";
 import type { InterventionRepo } from "@ava/db";
 import { ScoreTier } from "@ava/shared";
+import { config } from "../config.js";
+import { runShadowEvaluation } from "./shadow-evaluator.js";
+import { logShadowComparison } from "./shadow-logger.js";
+import { runFastEvaluation, shouldEscalateToLLM } from "./fast-evaluator.js";
+import { resolveExperimentOverrides } from "../experiment/experiment-resolver.js";
+import type { ExperimentOverrides } from "@ava/shared";
 
 export interface EvaluationResult {
   evaluationId: string;
@@ -16,12 +22,202 @@ export interface EvaluationResult {
   signals: { intent: number; friction: number; clarity: number; receptivity: number; value: number };
   reasoning: string;
   recommendedAction: string;
+  engine: "llm" | "fast";
+}
+
+// ── Tier helpers ──────────────────────────────────────────────────────────────
+
+const TIER_LABELS: Record<ScoreTier, string> = {
+  [ScoreTier.MONITOR]: "MONITOR",
+  [ScoreTier.PASSIVE]: "PASSIVE",
+  [ScoreTier.NUDGE]: "NUDGE",
+  [ScoreTier.ACTIVE]: "ACTIVE",
+  [ScoreTier.ESCALATE]: "ESCALATE",
+};
+
+const INTERVENTION_TYPE_MAP: Record<ScoreTier, string | null> = {
+  [ScoreTier.MONITOR]: null,
+  [ScoreTier.PASSIVE]: "passive",
+  [ScoreTier.NUDGE]: "nudge",
+  [ScoreTier.ACTIVE]: "active",
+  [ScoreTier.ESCALATE]: "escalate",
+};
+
+/**
+ * Run the evaluation pipeline for a batch of events.
+ *
+ * Engine selection priority:
+ *   1. Experiment override (if session is in an active experiment)
+ *   2. EVAL_ENGINE env var / config
+ *
+ * Modes: "llm" | "fast" | "auto"
+ */
+export async function evaluateEventBatch(
+  sessionId: string,
+  eventIds: string[]
+): Promise<EvaluationResult | null> {
+  // Resolve experiment overrides (non-blocking on failure)
+  const session = await SessionRepo.getSession(sessionId);
+  const siteUrl = session?.siteUrl;
+  const overrides = await resolveExperimentOverrides(sessionId, siteUrl);
+
+  // Apply experiment engine override or use config default
+  const engine = overrides?.evalEngine ?? config.evalEngine;
+
+  // Store overrides for MSWIM config loading (passed via sessionId context)
+  if (overrides?.scoringConfigId) {
+    _experimentConfigOverrides.set(sessionId, overrides.scoringConfigId);
+  }
+
+  try {
+    if (engine === "fast") {
+      return await evaluateFast(sessionId, eventIds);
+    }
+
+    if (engine === "auto") {
+      return await evaluateAuto(sessionId, eventIds);
+    }
+
+    // Default: "llm"
+    return await evaluateLLM(sessionId, eventIds);
+  } finally {
+    // Clean up per-session override
+    _experimentConfigOverrides.delete(sessionId);
+  }
 }
 
 /**
- * Run the full evaluation pipeline for a batch of events.
+ * Per-session experiment config overrides. Set before MSWIM runs,
+ * cleaned up after evaluation completes. Thread-safe for single-threaded Node.
  */
-export async function evaluateEventBatch(
+export const _experimentConfigOverrides = new Map<string, string>();
+
+/**
+ * Get the experiment scoring config override for a session, if any.
+ */
+export function getExperimentConfigOverride(sessionId: string): string | undefined {
+  return _experimentConfigOverrides.get(sessionId);
+}
+
+// ── Fast engine path ──────────────────────────────────────────────────────────
+
+async function evaluateFast(
+  sessionId: string,
+  eventIds: string[]
+): Promise<EvaluationResult | null> {
+  const { sessionCtx, frictionIds } = await buildSessionAndFrictions(sessionId, eventIds);
+  if (!sessionCtx) return null;
+
+  const fastResult = await runFastEvaluation({
+    sessionCtx,
+    detectedFrictionIds: frictionIds,
+    pageType: sessionCtx.pageType,
+    eventCount: sessionCtx.eventCount,
+  });
+
+  const { mswimResult, narrative, reasoning } = fastResult;
+  const tierLabel = TIER_LABELS[mswimResult.tier];
+  const interventionType = INTERVENTION_TYPE_MAP[mswimResult.tier];
+
+  const evaluation = await EvaluationRepo.createEvaluation({
+    sessionId,
+    eventBatchIds: JSON.stringify(eventIds),
+    narrative,
+    frictionsFound: JSON.stringify(frictionIds),
+    intentScore: mswimResult.signals.intent,
+    frictionScore: mswimResult.signals.friction,
+    clarityScore: mswimResult.signals.clarity,
+    receptivityScore: mswimResult.signals.receptivity,
+    valueScore: mswimResult.signals.value,
+    compositeScore: mswimResult.composite_score,
+    weightsUsed: JSON.stringify(mswimResult.weights_used),
+    tier: tierLabel,
+    decision: mswimResult.decision,
+    gateOverride: mswimResult.gate_override?.toString() ?? undefined,
+    interventionType: interventionType ?? undefined,
+    reasoning,
+  });
+
+  return {
+    evaluationId: evaluation.id,
+    decision: mswimResult.decision,
+    tier: tierLabel,
+    compositeScore: mswimResult.composite_score,
+    interventionType,
+    frictionIds,
+    narrative,
+    signals: mswimResult.signals,
+    reasoning,
+    recommendedAction: "monitor",
+    engine: "fast",
+  };
+}
+
+// ── Auto engine path (fast first, LLM fallback) ──────────────────────────────
+
+async function evaluateAuto(
+  sessionId: string,
+  eventIds: string[]
+): Promise<EvaluationResult | null> {
+  const { sessionCtx, frictionIds, context } = await buildSessionAndFrictions(sessionId, eventIds);
+  if (!sessionCtx) return null;
+
+  // 1. Run fast engine
+  const fastResult = await runFastEvaluation({
+    sessionCtx,
+    detectedFrictionIds: frictionIds,
+    pageType: sessionCtx.pageType,
+    eventCount: sessionCtx.eventCount,
+  });
+
+  // 2. Check if we should escalate to LLM
+  if (shouldEscalateToLLM(fastResult) && context) {
+    console.log(`[Evaluate:auto] Escalating to LLM for session ${sessionId} (composite=${fastResult.mswimResult.composite_score.toFixed(1)})`);
+    return evaluateLLM(sessionId, eventIds);
+  }
+
+  // 3. Use fast result
+  const { mswimResult, narrative, reasoning } = fastResult;
+  const tierLabel = TIER_LABELS[mswimResult.tier];
+  const interventionType = INTERVENTION_TYPE_MAP[mswimResult.tier];
+
+  const evaluation = await EvaluationRepo.createEvaluation({
+    sessionId,
+    eventBatchIds: JSON.stringify(eventIds),
+    narrative,
+    frictionsFound: JSON.stringify(frictionIds),
+    intentScore: mswimResult.signals.intent,
+    frictionScore: mswimResult.signals.friction,
+    clarityScore: mswimResult.signals.clarity,
+    receptivityScore: mswimResult.signals.receptivity,
+    valueScore: mswimResult.signals.value,
+    compositeScore: mswimResult.composite_score,
+    weightsUsed: JSON.stringify(mswimResult.weights_used),
+    tier: tierLabel,
+    decision: mswimResult.decision,
+    gateOverride: mswimResult.gate_override?.toString() ?? undefined,
+    interventionType: interventionType ?? undefined,
+    reasoning,
+  });
+
+  return {
+    evaluationId: evaluation.id,
+    decision: mswimResult.decision,
+    tier: tierLabel,
+    compositeScore: mswimResult.composite_score,
+    interventionType,
+    frictionIds,
+    narrative,
+    signals: mswimResult.signals,
+    reasoning,
+    recommendedAction: "monitor",
+    engine: "fast",
+  };
+}
+
+// ── Full LLM engine path ─────────────────────────────────────────────────────
+
+async function evaluateLLM(
   sessionId: string,
   eventIds: string[]
 ): Promise<EvaluationResult | null> {
@@ -43,7 +239,6 @@ export async function evaluateEventBatch(
     (Date.now() - session.startedAt.getTime()) / 1000
   );
 
-  // Build MSWIM session context (simplified — in production, gather more data)
   const sessionCtx: SessionContext = {
     sessionId,
     siteUrl: session.siteUrl,
@@ -59,16 +254,16 @@ export async function evaluateEventBatch(
     ruleBasedCorroboration: llmOutput.detected_frictions.length > 0,
     totalInterventionsFired: session.totalInterventionsFired,
     totalDismissals: session.totalDismissals,
-    totalNudges: 0, // TODO: count from intervention history
-    totalActive: 0, // TODO: count from intervention history
-    totalNonPassive: session.totalInterventionsFired, // approximation
-    secondsSinceLastIntervention: null, // TODO: compute from last intervention
+    totalNudges: 0,
+    totalActive: 0,
+    totalNonPassive: session.totalInterventionsFired,
+    secondsSinceLastIntervention: null,
     secondsSinceLastActive: null,
     secondsSinceLastNudge: null,
     secondsSinceLastDismissal: null,
-    frictionIdsAlreadyIntervened: [], // TODO: gather from intervention history
-    widgetOpenedVoluntarily: false, // TODO: track from events
-    idleSeconds: 0, // TODO: compute from event timestamps
+    frictionIdsAlreadyIntervened: [],
+    widgetOpenedVoluntarily: false,
+    idleSeconds: 0,
     hasTechnicalError: llmOutput.detected_frictions.some(
       (id) => id >= "F161" && id <= "F177"
     ),
@@ -97,26 +292,10 @@ export async function evaluateEventBatch(
     sessionCtx
   );
 
-  // 5. Map tier to intervention type
-  const tierLabels: Record<ScoreTier, string> = {
-    [ScoreTier.MONITOR]: "MONITOR",
-    [ScoreTier.PASSIVE]: "PASSIVE",
-    [ScoreTier.NUDGE]: "NUDGE",
-    [ScoreTier.ACTIVE]: "ACTIVE",
-    [ScoreTier.ESCALATE]: "ESCALATE",
-  };
-  const tierLabel = tierLabels[mswimResult.tier];
+  const tierLabel = TIER_LABELS[mswimResult.tier];
+  const interventionType = INTERVENTION_TYPE_MAP[mswimResult.tier];
 
-  const interventionTypeMap: Record<ScoreTier, string | null> = {
-    [ScoreTier.MONITOR]: null,
-    [ScoreTier.PASSIVE]: "passive",
-    [ScoreTier.NUDGE]: "nudge",
-    [ScoreTier.ACTIVE]: "active",
-    [ScoreTier.ESCALATE]: "escalate",
-  };
-  const interventionType = interventionTypeMap[mswimResult.tier];
-
-  // 6. Persist evaluation
+  // 5. Persist evaluation
   const evaluation = await EvaluationRepo.createEvaluation({
     sessionId,
     eventBatchIds: JSON.stringify(eventIds),
@@ -131,10 +310,42 @@ export async function evaluateEventBatch(
     weightsUsed: JSON.stringify(mswimResult.weights_used),
     tier: tierLabel,
     decision: mswimResult.decision,
-    gateOverride: mswimResult.gate_override?.toString() ?? null,
-    interventionType,
+    gateOverride: mswimResult.gate_override?.toString() ?? undefined,
+    interventionType: interventionType ?? undefined,
     reasoning: mswimResult.reasoning,
   });
+
+  // === SHADOW MODE: Run MSWIM-no-LLM in background (non-blocking) ===
+  if (config.shadow.enabled) {
+    const eventFrictionIds = context.newEvents
+      .map((e) => e.frictionId as string | null)
+      .filter((id): id is string => id !== null);
+    const allFrictionIds = [
+      ...new Set([...eventFrictionIds, ...llmOutput.detected_frictions]),
+    ];
+
+    runShadowEvaluation({
+      sessionCtx,
+      detectedFrictionIds: allFrictionIds,
+      pageType: sessionCtx.pageType,
+      eventCount: sessionCtx.eventCount,
+    })
+      .then((shadow) =>
+        logShadowComparison({
+          sessionId,
+          evaluationId: evaluation.id,
+          prodResult: mswimResult,
+          shadowResult: shadow.shadowResult,
+          syntheticHints: shadow.syntheticHints,
+          pageType: sessionCtx.pageType,
+          eventCount: sessionCtx.eventCount,
+          cartValue: sessionCtx.cartValue,
+        })
+      )
+      .catch((err) =>
+        console.error("[Shadow] Failed (non-blocking):", err)
+      );
+  }
 
   return {
     evaluationId: evaluation.id,
@@ -147,5 +358,86 @@ export async function evaluateEventBatch(
     signals: mswimResult.signals,
     reasoning: mswimResult.reasoning,
     recommendedAction: llmOutput.recommended_action,
+    engine: "llm",
   };
+}
+
+// ── Shared helpers ────────────────────────────────────────────────────────────
+
+import type { EvaluationContext } from "./context-builder.js";
+
+/**
+ * Build session context + extract friction IDs from events.
+ * Shared by fast and auto engine paths.
+ */
+async function buildSessionAndFrictions(
+  sessionId: string,
+  eventIds: string[]
+): Promise<{
+  sessionCtx: SessionContext | null;
+  frictionIds: string[];
+  context: EvaluationContext | null;
+}> {
+  const context = await buildContext(sessionId, eventIds);
+  if (!context) {
+    console.error(`[Evaluate] Session ${sessionId} not found`);
+    return { sessionCtx: null, frictionIds: [], context: null };
+  }
+
+  const session = await SessionRepo.getSession(sessionId);
+  if (!session) return { sessionCtx: null, frictionIds: [], context: null };
+
+  // Extract friction IDs from events (client-reported)
+  const frictionIds = [
+    ...new Set(
+      context.newEvents
+        .map((e) => e.frictionId as string | null)
+        .filter((id): id is string => id !== null)
+    ),
+  ];
+
+  const sessionAgeSec = Math.floor(
+    (Date.now() - session.startedAt.getTime()) / 1000
+  );
+
+  const sessionCtx: SessionContext = {
+    sessionId,
+    siteUrl: session.siteUrl,
+    sessionAgeSec,
+    pageType: (context.newEvents[context.newEvents.length - 1]?.pageType as string) ?? "other",
+    isLoggedIn: session.isLoggedIn,
+    isRepeatVisitor: session.isRepeatVisitor,
+    cartValue: session.cartValue,
+    cartItemCount: session.cartItemCount,
+    deviceType: session.deviceType,
+    referrerType: session.referrerType,
+    eventCount: context.newEvents.length,
+    ruleBasedCorroboration: frictionIds.length > 0,
+    totalInterventionsFired: session.totalInterventionsFired,
+    totalDismissals: session.totalDismissals,
+    totalNudges: 0,
+    totalActive: 0,
+    totalNonPassive: session.totalInterventionsFired,
+    secondsSinceLastIntervention: null,
+    secondsSinceLastActive: null,
+    secondsSinceLastNudge: null,
+    secondsSinceLastDismissal: null,
+    frictionIdsAlreadyIntervened: [],
+    widgetOpenedVoluntarily: false,
+    idleSeconds: 0,
+    hasTechnicalError: frictionIds.some(
+      (id) => id >= "F161" && id <= "F177"
+    ),
+    hasOutOfStock: frictionIds.includes("F053"),
+    hasShippingIssue: frictionIds.some(
+      (id) => id >= "F236" && id <= "F247"
+    ),
+    hasPaymentFailure: frictionIds.some(
+      (id) => id === "F096" || id === "F097"
+    ),
+    hasCheckoutTimeout: frictionIds.includes("F112"),
+    hasHelpSearch: frictionIds.includes("F036"),
+  };
+
+  return { sessionCtx, frictionIds, context };
 }

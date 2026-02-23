@@ -1,5 +1,6 @@
 import type { WebSocket } from "ws";
 import { processTrackEvent } from "./track.service.js";
+import { recordInterventionOutcome } from "../intervene/intervene.service.js";
 import {
   WsWidgetMessageSchema,
   InterventionOutcomeSchema,
@@ -21,13 +22,29 @@ export function handleTrackMessage(ws: WebSocket, data: unknown) {
       // Maybe it's an intervention outcome
       const outcomeResult = validatePayload(InterventionOutcomeSchema, raw);
       if (outcomeResult.success) {
-        // TODO: wire to intervene.service.recordInterventionOutcome
-        ws.send(
-          JSON.stringify({
-            type: "outcome_ack",
-            intervention_id: outcomeResult.data.intervention_id,
-          }),
-        );
+        const { intervention_id, status, conversion_action } =
+          outcomeResult.data;
+
+        recordInterventionOutcome(intervention_id, status, conversion_action)
+          .then(() => {
+            ws.send(
+              JSON.stringify({
+                type: "outcome_ack",
+                intervention_id,
+                status,
+              }),
+            );
+          })
+          .catch((error) => {
+            console.error("[Track] Outcome recording error:", error);
+            ws.send(
+              JSON.stringify({
+                type: "outcome_error",
+                intervention_id,
+                error: "Failed to record outcome",
+              }),
+            );
+          });
         return;
       }
 

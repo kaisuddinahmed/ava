@@ -1,0 +1,193 @@
+// ============================================================================
+// Job Runner — setTimeout-based scheduler with drift correction.
+// Runs the nightly batch, hourly snapshots, and canary health checks.
+// ============================================================================
+
+import { JobRunRepo } from "@ava/db";
+import { config } from "../config.js";
+import { runNightlyBatch } from "./nightly-batch.job.js";
+import { computeWindowSnapshot } from "./drift-detector.js";
+import { checkAllRolloutsHealth } from "../rollout/rollout-health.service.js";
+
+// ---------------------------------------------------------------------------
+// Job Runner
+// ---------------------------------------------------------------------------
+
+export class JobRunner {
+  private nightlyTimer: ReturnType<typeof setTimeout> | null = null;
+  private hourlyTimer: ReturnType<typeof setInterval> | null = null;
+  private canaryTimer: ReturnType<typeof setInterval> | null = null;
+  private targetHourUTC: number;
+
+  constructor(targetHourUTC?: number) {
+    this.targetHourUTC = targetHourUTC ?? config.jobs.nightlyHourUTC;
+  }
+
+  /**
+   * Start all scheduled jobs.
+   */
+  start(): void {
+    // 1. Nightly batch
+    this.scheduleNightlyBatch();
+
+    // 2. Hourly drift snapshots
+    if (config.jobs.hourlySnapshotEnabled) {
+      this.startHourlySnapshots();
+    }
+
+    // 3. Canary health checks (every N hours)
+    this.startCanaryChecks();
+  }
+
+  /**
+   * Stop all timers.
+   */
+  stop(): void {
+    if (this.nightlyTimer) {
+      clearTimeout(this.nightlyTimer);
+      this.nightlyTimer = null;
+    }
+    if (this.hourlyTimer) {
+      clearInterval(this.hourlyTimer);
+      this.hourlyTimer = null;
+    }
+    if (this.canaryTimer) {
+      clearInterval(this.canaryTimer);
+      this.canaryTimer = null;
+    }
+  }
+
+  /**
+   * Trigger a nightly batch run immediately.
+   */
+  async runNow(triggeredBy: string = "api"): Promise<{
+    jobRunId: string;
+    result: Record<string, unknown>;
+  }> {
+    return this.executeNightlyBatch(triggeredBy);
+  }
+
+  /**
+   * Get the next scheduled nightly batch time.
+   */
+  getNextRunTime(): Date {
+    const now = new Date();
+    const next = new Date(now);
+    next.setUTCHours(this.targetHourUTC, 0, 0, 0);
+
+    if (next <= now) {
+      next.setUTCDate(next.getUTCDate() + 1);
+    }
+
+    return next;
+  }
+
+  // ── Nightly batch ─────────────────────────────────────────────────────────
+
+  private scheduleNightlyBatch(): void {
+    const msUntilTarget = this.calculateMsUntilTarget();
+    console.log(
+      `[JobRunner] Nightly batch scheduled for ${this.getNextRunTime().toISOString()} (${Math.round(msUntilTarget / 60000)} min)`,
+    );
+
+    this.nightlyTimer = setTimeout(async () => {
+      try {
+        await this.executeNightlyBatch("scheduler");
+      } catch (error) {
+        console.error("[JobRunner] Nightly batch failed:", error);
+      }
+      // Re-schedule for the next day
+      this.scheduleNightlyBatch();
+    }, msUntilTarget);
+  }
+
+  private async executeNightlyBatch(triggeredBy: string): Promise<{
+    jobRunId: string;
+    result: Record<string, unknown>;
+  }> {
+    const startTime = Date.now();
+    const jobRun = await JobRunRepo.createJobRun({
+      jobName: "nightly_batch",
+      triggeredBy,
+    });
+
+    try {
+      const result = await runNightlyBatch();
+      const durationMs = Date.now() - startTime;
+
+      await JobRunRepo.completeJobRun(
+        jobRun.id,
+        result as unknown as Record<string, unknown>,
+        durationMs,
+      );
+
+      console.log(
+        `[JobRunner] Nightly batch completed in ${durationMs}ms (${result.subtasks.length} subtasks, ${result.errors.length} errors)`,
+      );
+
+      return { jobRunId: jobRun.id, result: result as unknown as Record<string, unknown> };
+    } catch (error) {
+      const durationMs = Date.now() - startTime;
+      const errorMsg =
+        error instanceof Error ? error.message : String(error);
+      await JobRunRepo.failJobRun(jobRun.id, errorMsg, durationMs);
+      throw error;
+    }
+  }
+
+  private calculateMsUntilTarget(): number {
+    const now = Date.now();
+    const next = this.getNextRunTime().getTime();
+    return next - now;
+  }
+
+  // ── Hourly snapshots ──────────────────────────────────────────────────────
+
+  private startHourlySnapshots(): void {
+    const HOUR_MS = 60 * 60 * 1000;
+
+    this.hourlyTimer = setInterval(async () => {
+      try {
+        await computeWindowSnapshot("1h");
+        console.log("[JobRunner] Hourly drift snapshot computed");
+      } catch (error) {
+        console.error("[JobRunner] Hourly snapshot failed:", error);
+      }
+    }, HOUR_MS);
+
+    console.log("[JobRunner] Hourly drift snapshots enabled");
+  }
+
+  // ── Canary health checks ──────────────────────────────────────────────────
+
+  private startCanaryChecks(): void {
+    const intervalMs =
+      config.jobs.canaryCheckIntervalHours * 60 * 60 * 1000;
+
+    this.canaryTimer = setInterval(async () => {
+      try {
+        await checkAllRolloutsHealth();
+        console.log("[JobRunner] Canary health check completed");
+      } catch (error) {
+        console.error("[JobRunner] Canary health check failed:", error);
+      }
+    }, intervalMs);
+
+    console.log(
+      `[JobRunner] Canary health checks every ${config.jobs.canaryCheckIntervalHours}h`,
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Convenience: singleton for server use
+// ---------------------------------------------------------------------------
+
+let _instance: JobRunner | null = null;
+
+export function getJobRunner(): JobRunner {
+  if (!_instance) {
+    _instance = new JobRunner();
+  }
+  return _instance;
+}

@@ -3,29 +3,43 @@ import type { MSWIMConfig, SignalWeights, TierThresholds, GateConfig } from "@av
 import { DEFAULT_WEIGHTS, DEFAULT_THRESHOLDS, DEFAULT_GATES } from "@ava/shared";
 
 // In-memory cache with 60-second TTL
-let cachedConfig: MSWIMConfig | null = null;
-let cachedSiteUrl: string | null = null;
-let cacheTimestamp = 0;
+// Cache key: `${siteUrl ?? "global"}:${configId ?? "active"}`
+const configCache = new Map<string, { config: MSWIMConfig; timestamp: number }>();
 const CACHE_TTL_MS = 60_000;
 
 /**
- * Load the active MSWIM config for a site. Falls back to global default,
+ * Load the MSWIM config for a site. Falls back to global default,
  * then to hardcoded defaults. Cached for 60 seconds.
+ *
+ * @param siteUrl     Site-specific config lookup
+ * @param scoringConfigId  Optional: load a specific ScoringConfig by ID
+ *                         (used by experiment variants to override the active config)
  */
-export async function loadMSWIMConfig(siteUrl?: string): Promise<MSWIMConfig> {
+export async function loadMSWIMConfig(
+  siteUrl?: string,
+  scoringConfigId?: string,
+): Promise<MSWIMConfig> {
   const now = Date.now();
+  const cacheKey = `${siteUrl ?? "global"}:${scoringConfigId ?? "active"}`;
 
-  // Return cached if still valid and same site
-  if (
-    cachedConfig &&
-    cachedSiteUrl === (siteUrl ?? null) &&
-    now - cacheTimestamp < CACHE_TTL_MS
-  ) {
-    return cachedConfig;
+  // Return cached if still valid
+  const cached = configCache.get(cacheKey);
+  if (cached && now - cached.timestamp < CACHE_TTL_MS) {
+    return cached.config;
   }
 
   try {
-    const dbConfig = await ScoringConfigRepo.getActiveConfig(siteUrl);
+    let dbConfig;
+
+    if (scoringConfigId) {
+      // Load specific config by ID (experiment variant override)
+      dbConfig = await ScoringConfigRepo.getScoringConfig(scoringConfigId);
+    } else {
+      // Load active config for site (default behavior)
+      dbConfig = await ScoringConfigRepo.getActiveConfig(siteUrl);
+    }
+
+    let mswimConfig: MSWIMConfig;
 
     if (dbConfig) {
       const weights: SignalWeights = {
@@ -54,33 +68,33 @@ export async function loadMSWIMConfig(siteUrl?: string): Promise<MSWIMConfig> {
         dismissalsToSuppress: dbConfig.dismissalsToSuppress,
       };
 
-      cachedConfig = { weights, thresholds, gates };
+      mswimConfig = { weights, thresholds, gates };
     } else {
       // Fallback to hardcoded defaults
-      cachedConfig = {
+      mswimConfig = {
         weights: { ...DEFAULT_WEIGHTS },
         thresholds: { ...DEFAULT_THRESHOLDS },
         gates: { ...DEFAULT_GATES },
       };
     }
+
+    configCache.set(cacheKey, { config: mswimConfig, timestamp: now });
+    return mswimConfig;
   } catch (error) {
     console.error("[MSWIM] Failed to load config from DB, using defaults:", error);
-    cachedConfig = {
+    const fallback: MSWIMConfig = {
       weights: { ...DEFAULT_WEIGHTS },
       thresholds: { ...DEFAULT_THRESHOLDS },
       gates: { ...DEFAULT_GATES },
     };
+    configCache.set(cacheKey, { config: fallback, timestamp: now });
+    return fallback;
   }
-
-  cachedSiteUrl = siteUrl ?? null;
-  cacheTimestamp = now;
-  return cachedConfig;
 }
 
 /**
  * Invalidate the cached config (e.g., after admin updates weights).
  */
 export function invalidateConfigCache(): void {
-  cachedConfig = null;
-  cacheTimestamp = 0;
+  configCache.clear();
 }

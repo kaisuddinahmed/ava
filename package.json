@@ -18,7 +18,15 @@
     "db:push:fast": "prisma db push --skip-generate --schema packages/db/prisma/schema.prisma",
     "db:generate": "prisma generate --schema packages/db/prisma/schema.prisma",
     "db:seed": "tsx scripts/seed-friction-catalog.ts && tsx scripts/seed-mswim-defaults.ts",
-    "db:setup": "npm run db:generate && npm run db:push && npm run db:seed"
+    "db:setup": "npm run db:generate && npm run db:push && npm run db:seed",
+    "simulate": "tsx scripts/simulate-sessions.ts",
+    "simulate:large": "tsx scripts/simulate-sessions.ts --sessions 50 --concurrency 5",
+    "fine-tune": "tsx scripts/fine-tune.ts",
+    "fine-tune:dry": "tsx scripts/fine-tune.ts --dry-run",
+    "fine-tune:export": "tsx scripts/fine-tune.ts --provider local",
+    "eval": "tsx scripts/eval-harness.ts",
+    "eval:verbose": "tsx scripts/eval-harness.ts --verbose",
+    "eval:csv": "tsx scripts/eval-harness.ts --csv data/eval-latest.csv"
   },
   "devDependencies": {
     "@rollup/rollup-darwin-arm64": "^4.57.1",

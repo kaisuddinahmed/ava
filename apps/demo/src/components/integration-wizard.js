@@ -193,6 +193,11 @@ export function createIntegrationWizard(root, options) {
         activation,
         message: `Integration is now ${activation.mode}.`,
       });
+
+      if (options.onActivated) {
+        options.onActivated(activation);
+      }
+
       await refreshStatus();
     } catch (error) {
       setState({
@@ -246,15 +251,18 @@ export function createIntegrationWizard(root, options) {
   root.addEventListener("click", onClick);
 
   const getStepState = () => {
-    const phase = state.run?.phase ?? "detect_platform";
     const status = state.run?.status ?? "";
     const verificationDone = Boolean(state.verification);
     const activationDone = Boolean(state.activation);
 
     const done = new Set();
-    if (status) done.add("analyze");
-    if (phase !== "detect_platform") done.add("map");
-    if (verificationDone || phase === "verify" || status === "completed") done.add("verify");
+    // Analyze = done when pipeline has started (any status beyond empty)
+    if (status && status !== "queued") done.add("analyze");
+    // Map = done only when pipeline has fully completed mapping
+    if (status === "completed") done.add("map");
+    // Verify = done only when user explicitly ran verify
+    if (verificationDone) done.add("verify");
+    // Activate = done when activation succeeded
     if (activationDone) done.add("activate");
 
     return done;
@@ -275,6 +283,12 @@ export function createIntegrationWizard(root, options) {
       state.coverage?.frictionMapped ?? state.metrics?.frictionMapped ?? 0;
     const frictionTarget =
       state.coverage?.frictionTarget ?? state.metrics?.frictionTarget ?? 325;
+    const avgConf = state.run?.avgConfidence ?? 0;
+
+    // Verify button requires mapping to be complete
+    const mappingDone = state.run?.status === "completed";
+    // Activate button requires verification to be done
+    const verifyDone = Boolean(state.verification);
 
     root.innerHTML = `
       <section class="wizard-card">
@@ -290,7 +304,7 @@ export function createIntegrationWizard(root, options) {
         <h3>Flow</h3>
         <ol class="steps">
           ${renderStep("Analyze", done.has("analyze"), state.run?.status || "pending")}
-          ${renderStep("Map", done.has("map"), state.run?.phase || "detect_platform")}
+          ${renderStep("Map", done.has("map"), mappingDone ? "completed" : state.run?.phase || "pending")}
           ${renderStep("Verify", done.has("verify"), state.verification?.recommendedMode || "pending")}
           ${renderStep("Activate", done.has("activate"), state.activation?.mode || "pending")}
         </ol>
@@ -306,17 +320,17 @@ export function createIntegrationWizard(root, options) {
           <div class="metric">
             <span>Behaviors</span>
             <strong>${behaviorMapped}/${behaviorTarget}</strong>
-            <small>${coveragePct(behaviorMapped, behaviorTarget)}</small>
+            <small>${coveragePct(behaviorMapped, behaviorTarget)} mapped</small>
           </div>
           <div class="metric">
             <span>Frictions</span>
             <strong>${frictionMapped}/${frictionTarget}</strong>
-            <small>${coveragePct(frictionMapped, frictionTarget)}</small>
+            <small>${coveragePct(frictionMapped, frictionTarget)} mapped</small>
           </div>
           <div class="metric">
-            <span>Progress</span>
-            <strong>${state.latestStatus?.progress ?? 0}%</strong>
-            <small>${escapeHtml(state.latestStatus?.status || "waiting")}</small>
+            <span>Confidence</span>
+            <strong>${avgConf ? (avgConf * 100).toFixed(0) + "%" : "—"}</strong>
+            <small>avg score</small>
           </div>
         </div>
       </section>
@@ -324,7 +338,7 @@ export function createIntegrationWizard(root, options) {
       <section class="wizard-card">
         <div class="row compact">
           <h3>Verification</h3>
-          <button data-action="verify" ${state.loading || !state.siteId ? "disabled" : ""}>Run Verify</button>
+          <button data-action="verify" ${state.loading || !mappingDone ? "disabled" : ""}>Run Verify</button>
         </div>
         <p class="micro">
           Recommended mode: <strong>${escapeHtml(state.verification?.recommendedMode || "not verified")}</strong>
@@ -334,16 +348,16 @@ export function createIntegrationWizard(root, options) {
       <section class="wizard-card">
         <h3>Activation</h3>
         <label for="modeSelect">Mode</label>
-        <select id="modeSelect" ${state.loading || !state.siteId ? "disabled" : ""}>
+        <select id="modeSelect" ${state.loading || !verifyDone ? "disabled" : ""}>
           ${renderModeOption("auto", state.mode, "Auto (recommended)")}
           ${renderModeOption("limited_active", state.mode, "Limited Active")}
           ${renderModeOption("active", state.mode, "Active")}
         </select>
         <label for="activationNotes">Notes</label>
         <textarea id="activationNotes" rows="3" placeholder="Optional notes for this activation">${escapeHtml(state.notes)}</textarea>
-        <button data-action="activate" ${state.loading || !state.siteId ? "disabled" : ""}>Activate</button>
+        <button data-action="activate" ${state.loading || !verifyDone ? "disabled" : ""}>Activate</button>
         <p class="micro">
-          Current mode: <strong>${escapeHtml(state.activation?.mode || state.run?.status || "not active")}</strong>
+          Current mode: <strong>${escapeHtml(state.activation?.mode || "not active")}</strong>
         </p>
       </section>
 

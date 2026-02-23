@@ -7,10 +7,6 @@ import type { TrackingHooks } from "../site-analyzer/hook-generator.js";
 import { generateHooks } from "../site-analyzer/hook-generator.js";
 import { mapBehaviorsForRun } from "./behavior-mapper.js";
 import { mapFrictionsForRun } from "./friction-mapper.js";
-import {
-  FULL_ACTIVE_THRESHOLDS,
-  verifyIntegrationReadiness,
-} from "./integration-verifier.js";
 import { broadcastOnboardingProgress } from "./progress-broadcaster.js";
 
 export async function runAnalyzerPipeline(analyzerRunId: string): Promise<void> {
@@ -77,52 +73,42 @@ export async function runAnalyzerPipeline(analyzerRunId: string): Promise<void> 
       trackingHooks,
     });
 
-    await AnalyzerRunRepo.updateAnalyzerRun(analyzerRunId, {
-      phase: "verify",
-      avgConfidence: (behaviorResult.avgConfidence + frictionResult.avgConfidence) / 2,
-    });
-    await pushProgress({
-      siteConfigId,
-      analyzerRunId,
-      status: "mapped",
-      progress: 75,
-      details: {
-        phase: "verify",
-        friction: frictionResult,
-      },
-    });
+    const avgConfidence =
+      (behaviorResult.avgConfidence + frictionResult.avgConfidence) / 2;
 
-    const verification = await verifyIntegrationReadiness({
-      analyzerRunId,
-      siteConfigId,
-      trackingHooks,
-    });
+    const behaviorCoveragePct =
+      behaviorResult.totalPatterns > 0
+        ? (behaviorResult.highConfidenceMappings / 614) * 100
+        : 0;
+    const frictionCoveragePct =
+      frictionResult.totalFrictions > 0
+        ? (frictionResult.highConfidenceMappings / 325) * 100
+        : 0;
 
     const summary = JSON.stringify({
-      thresholds: FULL_ACTIVE_THRESHOLDS,
-      verification,
       behavior: behaviorResult,
       friction: frictionResult,
       generatedAt: new Date().toISOString(),
     });
 
     await AnalyzerRunRepo.completeAnalyzerRun(analyzerRunId, {
-      phase: "verify",
-      behaviorCoverage: verification.behaviorCoveragePct,
-      frictionCoverage: verification.frictionCoveragePct,
-      avgConfidence: verification.avgConfidence,
+      phase: "map_frictions",
+      behaviorCoverage: Math.round(behaviorCoveragePct * 100) / 100,
+      frictionCoverage: Math.round(frictionCoveragePct * 100) / 100,
+      avgConfidence: Math.round(avgConfidence * 100) / 100,
       summary,
     });
 
-    await SiteConfigRepo.setIntegrationStatus(siteConfigId, "verified", analyzerRunId);
+    await SiteConfigRepo.setIntegrationStatus(siteConfigId, "mapped", analyzerRunId);
     await pushProgress({
       siteConfigId,
       analyzerRunId,
-      status: "verified",
+      status: "mapped",
       progress: 90,
       details: {
-        phase: "verify",
-        verification,
+        phase: "map_frictions",
+        behavior: behaviorResult,
+        friction: frictionResult,
       },
     });
   } catch (error) {

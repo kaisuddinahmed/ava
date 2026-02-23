@@ -68,6 +68,30 @@ export class FISMBridge {
     }
   }
 
+  /**
+   * Send a behavioral event formatted for the server's "track" Zod schema.
+   * Server expects: { type: "track", event: {...}, visitorKey, siteUrl, ... }
+   */
+  sendTrackEvent(event: Record<string, any>): void {
+    const w = typeof window !== "undefined" ? window : undefined;
+    const msg = {
+      type: "track",
+      visitorKey: this.sessionId,
+      sessionKey: this.sessionId,
+      siteUrl: w?.location?.origin ?? "",
+      deviceType: !w ? "desktop" : w.innerWidth < 768 ? "mobile" : w.innerWidth < 1024 ? "tablet" : "desktop",
+      referrerType: "direct",
+      isLoggedIn: false,
+      isRepeatVisitor: false,
+      event,
+    };
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify(msg));
+    } else {
+      this.messageQueue.push(msg);
+    }
+  }
+
   on(event: string, callback: BridgeEventListener): () => void {
     if (!this.listeners.has(event)) this.listeners.set(event, new Set());
     this.listeners.get(event)!.add(callback);

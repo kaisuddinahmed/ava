@@ -1,6 +1,6 @@
-import { EventRepo } from "@ava/db";
+import { EventRepo, SessionRepo } from "@ava/db";
 import { EventBuffer } from "./event-buffer.js";
-import { normalizeEvent, type NormalizedEvent } from "./event-normalizer.js";
+import { normalizeEvent, extractUtmFields, type NormalizedEvent } from "./event-normalizer.js";
 import { getOrCreateSession, updateSessionCart, type SessionInitData } from "./session-manager.js";
 import { evaluateEventBatch } from "../evaluate/evaluate.service.js";
 import { handleDecision } from "../intervene/intervene.service.js";
@@ -14,11 +14,35 @@ const buffer = new EventBuffer(async (sessionId, eventIds) => {
     const result = await evaluateEventBatch(sessionId, eventIds);
     if (!result) return;
 
-    // Broadcast evaluation to dashboard
+    // Broadcast evaluation to dashboard (reshape to match dashboard EvaluationData)
     broadcastToChannel("dashboard", {
       type: "evaluation",
       sessionId,
-      data: result,
+      data: {
+        evaluation_id: result.evaluationId,
+        session_id: sessionId,
+        timestamp: Date.now(),
+        narrative: result.narrative,
+        frictions_found: result.frictionIds.map((fid) => ({
+          friction_id: fid,
+          category: "detected",
+          confidence: 0.8,
+          evidence: [],
+          source: result.engine === "llm" ? "llm" as const : "rule" as const,
+        })),
+        mswim: {
+          signals: result.signals,
+          weights_used: {},
+          composite_score: result.compositeScore,
+          tier: result.tier,
+          gate_override: null,
+          decision: result.decision,
+          reasoning: result.reasoning,
+        },
+        intervention_type: result.interventionType,
+        decision_reasoning: result.reasoning,
+        engine: result.engine,
+      },
     });
 
     // Make final decision
@@ -35,11 +59,25 @@ const buffer = new EventBuffer(async (sessionId, eventIds) => {
           data: intervention,
         });
 
-        // Broadcast to dashboard
+        // Broadcast to dashboard (reshape to match dashboard InterventionData)
+        const payload = intervention.payload as Record<string, unknown>;
         broadcastToChannel("dashboard", {
           type: "intervention",
           sessionId,
-          data: intervention,
+          data: {
+            intervention_id: intervention.interventionId,
+            session_id: sessionId,
+            type: intervention.type,
+            action_code: intervention.actionCode,
+            friction_id: intervention.frictionId,
+            timestamp: Date.now(),
+            message: payload?.message as string | undefined,
+            cta_label: payload?.cta_label as string | undefined,
+            cta_action: payload?.cta_action as string | undefined,
+            mswim_score: intervention.mswimScore,
+            mswim_tier: intervention.tier,
+            status: "sent" as const,
+          },
         });
       }
     }
@@ -62,13 +100,36 @@ export async function processTrackEvent(
   // 2. Normalize the event
   const normalized = normalizeEvent(rawEvent);
 
-  // 3. Persist the event
+  // 3. Persist the event (include analytics fields + denormalized siteUrl)
   const event = await EventRepo.createEvent({
     sessionId,
     ...normalized,
+    siteUrl: sessionData.siteUrl,
   });
 
-  // 4. Update cart if cart event
+  // 4. Analytics side-effects on page_view / page_unload (non-blocking)
+  if (normalized.eventType === "page_view") {
+    // Increment page view counter
+    SessionRepo.incrementPageViews(sessionId).catch(() => {});
+
+    // Set entry page + UTM fields on the first page_view (only if entryPage not yet set)
+    const utmFields = extractUtmFields(rawEvent);
+    SessionRepo.getSession(sessionId).then((session) => {
+      if (session && !session.entryPage) {
+        SessionRepo.setEntryPage(sessionId, normalized.pageUrl, utmFields).catch(() => {});
+      }
+    }).catch(() => {});
+  }
+
+  if (normalized.eventType === "page_unload") {
+    // Update exit page and accumulate time-on-site
+    SessionRepo.setExitPage(sessionId, normalized.pageUrl).catch(() => {});
+    if (normalized.timeOnPageMs && normalized.timeOnPageMs > 0) {
+      SessionRepo.accumulateTimeOnSite(sessionId, normalized.timeOnPageMs).catch(() => {});
+    }
+  }
+
+  // 5. Update cart if cart event
   if (normalized.category === "cart") {
     try {
       const signals = JSON.parse(normalized.rawSignals);

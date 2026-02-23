@@ -13,22 +13,23 @@ export function computeValue(
     referrerType: string;
   }
 ): number {
-  // Base from cart value brackets
+  // Base from cart value brackets: [maxCartValue, score, _unused]
   let score = 20; // minimum base
   for (const bracket of VALUE_CART_BRACKETS) {
-    if (ctx.cartValue >= bracket.min) {
-      score = bracket.score;
+    if (ctx.cartValue <= bracket[0]) {
+      score = bracket[1];
+      break;
     }
   }
 
   // Logged-in boost
-  if (ctx.isLoggedIn) score += VALUE_BOOSTS.loggedIn;
+  if (ctx.isLoggedIn) score += VALUE_BOOSTS.LOGGED_IN;
 
   // Repeat visitor boost
-  if (ctx.isRepeatVisitor) score += VALUE_BOOSTS.repeatVisitor;
+  if (ctx.isRepeatVisitor) score += VALUE_BOOSTS.REPEAT_CUSTOMER;
 
   // Paid acquisition boost
-  if (ctx.referrerType === "paid") score += VALUE_BOOSTS.paidAcquisition;
+  if (ctx.referrerType === "paid") score += VALUE_BOOSTS.PAID_ACQUISITION;
 
   // Blend in LLM hint (20% weight)
   score = score * 0.8 + llmHint * 0.2;

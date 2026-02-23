@@ -135,7 +135,7 @@ export class SearchObserver {
 
     for (const sel of zeroResultSelectors) {
       const el = document.querySelector(sel);
-      if (el && el.offsetHeight > 0) {
+      if (el && (el as HTMLElement).offsetHeight > 0) {
         this.bridge.send("behavioral_event", {
           event_id: this.uid(),
           friction_id: "F028",

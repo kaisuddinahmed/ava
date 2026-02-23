@@ -22,27 +22,27 @@ export function computeReceptivity(
   let score = RECEPTIVITY_BASE; // 80
 
   // Decrements
-  score -= ctx.totalInterventionsFired * RECEPTIVITY_DECREMENTS.perInterventionFired; // -15 each
-  score -= ctx.totalDismissals * RECEPTIVITY_DECREMENTS.perDismissal; // -25 each
+  score -= ctx.totalInterventionsFired * RECEPTIVITY_DECREMENTS.PER_NON_PASSIVE_INTERVENTION; // -15 each
+  score -= ctx.totalDismissals * RECEPTIVITY_DECREMENTS.PER_DISMISSAL; // -25 each
 
   if (
     ctx.secondsSinceLastIntervention !== null &&
     ctx.secondsSinceLastIntervention < 120
   ) {
-    score -= RECEPTIVITY_DECREMENTS.recentIntervention; // -10
+    score -= RECEPTIVITY_DECREMENTS.RECENT_INTERVENTION; // -10
   }
 
   if (ctx.isMobile) {
-    score -= RECEPTIVITY_DECREMENTS.mobile; // -5
+    score -= RECEPTIVITY_DECREMENTS.MOBILE_DEVICE; // -5
   }
 
   // Increments
   if (ctx.widgetOpenedVoluntarily) {
-    score += RECEPTIVITY_INCREMENTS.voluntaryWidgetOpen; // +10
+    score += RECEPTIVITY_INCREMENTS.VOLUNTARY_WIDGET_OPEN; // +10
   }
 
   if (ctx.idleSeconds > 60) {
-    score += RECEPTIVITY_INCREMENTS.idleOver60s; // +10
+    score += RECEPTIVITY_INCREMENTS.IDLE_OVER_60S; // +10
   }
 
   // Blend in LLM hint (10% weight)

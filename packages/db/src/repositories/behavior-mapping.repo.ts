@@ -132,6 +132,21 @@ export async function countDistinctBehaviorPatterns(
   return rows.length;
 }
 
+export async function countHighConfidenceBehaviors(
+  siteConfigId: string,
+  analyzerRunId?: string,
+  threshold = 0.75,
+) {
+  const db = prisma as any;
+  return db.behaviorPatternMapping.count({
+    where: {
+      siteConfigId,
+      ...(analyzerRunId ? { analyzerRunId } : {}),
+      confidence: { gte: threshold },
+    },
+  });
+}
+
 export async function deleteBehaviorMappingsBySite(siteConfigId: string) {
   const db = prisma as any;
   return db.behaviorPatternMapping.deleteMany({
